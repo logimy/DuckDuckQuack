@@ -7,6 +7,14 @@ export const CONFIG = {
   move:  { maxSpeedPerTick: 7, deadZone: 4, followGain: 0.25, velAlpha: 0.35, targetAlpha: 0.25 },
   reconcile: { smallErrPx: 1.5, snapErrPx: 64, alpha: 0.12 },
   remote: { lerpAlpha: 0.2 },
+
+  // Ducks client visuals
+  ducks: {
+    radius: 10,
+    lerpAlpha: 0.2,
+    depth: 91,
+  },
+
   assets: {
     ship: "ship_0001",
     shipUrl: "https://cdn.glitch.global/3e033dcd-d5be-4db4-99e8-086ae90969ec/ship_0001.png",

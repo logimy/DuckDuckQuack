@@ -9,6 +9,7 @@ import { MovementSystem } from "../systems/MovementSystem";
 import { ReconcileSystem } from "../systems/ReconcileSystem";
 import { interpolateRemotes } from "../systems/RemoteInterpolationSystem";
 import { ColyseusBridge } from "../net/ColyseusBridge";
+import { DucksLayer } from "../entities/ducks";
 
 export class GameScene extends Phaser.Scene {
   // Net & entities
@@ -23,6 +24,9 @@ export class GameScene extends Phaser.Scene {
   private tether!: TetherSystem;
   private move!: MovementSystem;
   private reconcile!: ReconcileSystem;
+
+  // Ducks visuals
+  private ducks!: DucksLayer;
 
   // Pointer-lock & virtual cursor
   private isLocked = false;
@@ -45,8 +49,9 @@ export class GameScene extends Phaser.Scene {
     this.tether = new TetherSystem(this);
     this.move = new MovementSystem();
     this.reconcile = new ReconcileSystem();
+    this.ducks = new DucksLayer(this);
 
-    // Initial lock state (before UI/net)
+    // Initial lock state
     this.isLocked = this.isCanvasLocked();
     this.move.setLocked(this.isLocked);
     this.updateUnlockedClass();
@@ -54,14 +59,23 @@ export class GameScene extends Phaser.Scene {
     // UI
     this.help.create(this.isLocked);
 
-    // Net
-    await this.net.connect(this, this.players, {
-      onLocalJoin: (sprite) => this.onLocalJoin(sprite),
-      onLocalUpdate: (x, y) => this.onLocalUpdate(x, y),
-      onRemoteJoin: () => {},
-      onRemoteUpdate: (id, x, y) => this.onRemoteUpdate(id, x, y),
-      onRemoteLeave: (id) => this.onRemoteLeave(id),
-    });
+    // Net (players + ducks)
+    await this.net.connect(
+      this,
+      this.players,
+      {
+        onLocalJoin: (sprite) => this.onLocalJoin(sprite),
+        onLocalUpdate: (x, y) => this.onLocalUpdate(x, y),
+        onRemoteJoin: () => {},
+        onRemoteUpdate: (id, x, y) => this.onRemoteUpdate(id, x, y),
+        onRemoteLeave: (id) => this.onRemoteLeave(id),
+      },
+      {
+        onAdd: this.ducks.onAdd,
+        onChange: this.ducks.onChange,
+        onRemove: this.ducks.onRemove,
+      }
+    );
     this.net.onLeave(() => this.cleanup());
 
     // Input
@@ -91,6 +105,9 @@ export class GameScene extends Phaser.Scene {
       if (this.isLocked && cp) this.tether.drawTo(cp.x, cp.y);
 
       interpolateRemotes(this.players, this.net.sessionId);
+
+      // Ducks smoothing
+      this.ducks.tickLerp(CONFIG.ducks.lerpAlpha);
     }
   }
 
@@ -109,18 +126,21 @@ export class GameScene extends Phaser.Scene {
       .setStrokeStyle(1, 0xff0000)
       .setDepth(91);
 
-    // If page started locked, initialize cursor once we actually have a player
     if (this.isLocked) this.initCursorAtPointer();
     else this.hideCursorAndTether();
   }
 
   private onLocalUpdate(x: number, y: number) {
     this.reconcile.setServerPos(x, y);
-    if (this.remoteRef) { this.remoteRef.x = x; this.remoteRef.y = y; }
+    if (this.remoteRef) {
+      this.remoteRef.x = x;
+      this.remoteRef.y = y;
+    }
   }
 
   private onRemoteUpdate(id: string, x: number, y: number) {
-    const s = this.players[id]; if (!s) return;
+    const s = this.players[id];
+    if (!s) return;
     s.setData("serverX", x);
     s.setData("serverY", y);
   }
@@ -133,7 +153,6 @@ export class GameScene extends Phaser.Scene {
   /* ------------------------------ Input ------------------------------ */
 
   private wirePointerLock() {
-    // Toggle on LMB
     this.input.on("pointerdown", (p: Phaser.Input.Pointer) => {
       if (!p.leftButtonDown()) return;
       const canvas = this.game.canvas as HTMLCanvasElement;
@@ -153,8 +172,16 @@ export class GameScene extends Phaser.Scene {
         const dx = pointer.movementX / cam.zoom;
         const dy = pointer.movementY / cam.zoom;
 
-        this.virtualCursor.x = Phaser.Math.Clamp(this.virtualCursor.x + dx, 0, CONFIG.world.width);
-        this.virtualCursor.y = Phaser.Math.Clamp(this.virtualCursor.y + dy, 0, CONFIG.world.height);
+        this.virtualCursor.x = Phaser.Math.Clamp(
+          this.virtualCursor.x + dx,
+          0,
+          CONFIG.world.width
+        );
+        this.virtualCursor.y = Phaser.Math.Clamp(
+          this.virtualCursor.y + dy,
+          0,
+          CONFIG.world.height
+        );
 
         this.move.setMouseWorld(this.virtualCursor.x, this.virtualCursor.y);
         this.cursor.showAt(this.virtualCursor.x, this.virtualCursor.y);
@@ -203,10 +230,15 @@ export class GameScene extends Phaser.Scene {
   /* ------------------------------ Cleanup ------------------------------ */
 
   private cleanup() {
-    Object.values(this.players).forEach(s => s?.destroy());
+    Object.values(this.players).forEach((s) => s?.destroy());
     this.players = {};
     this.me = undefined;
-    this.remoteRef?.destroy(); this.remoteRef = undefined;
-    this.cursor?.destroy(); this.tether?.destroy(); this.help?.destroy();
+    this.remoteRef?.destroy();
+    this.remoteRef = undefined;
+    this.cursor?.destroy();
+    this.tether?.destroy();
+    this.help?.destroy();
+
+    this.ducks?.clear();
   }
 }
