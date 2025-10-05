@@ -225,7 +225,6 @@ export class MyRoom extends Room<MyRoomState> {
     if (!players.length) return;
 
     const PR = CONFIG.DUCK.PANIC_RADIUS;
-    const PR2 = PR * PR;
     const fleeMax = CONFIG.DUCK.SPEED_FLEE;
     const accelCap = CONFIG.DUCK.FLEE_ACCEL;
     const exp = CONFIG.DUCK.FLEE_EASE_EXP;
@@ -233,23 +232,53 @@ export class MyRoom extends Room<MyRoomState> {
     const minFlee = CONFIG.DUCK.SPEED_SOLO;
 
     for (const d of this.state.ducks.values()) {
-      // nearest player vector (away-from)
-      let bestD2 = Infinity, ax = 0, ay = 0, nearest = Infinity;
+      let rx = 0, ry = 0;
+      let nearest = Infinity;
+      let anyInPR = false;
+
+      let sumPx = 0, sumPy = 0;
+
       for (const p of players) {
-        const dx = d.x - p.x, dy = d.y - p.y;
-        const d2 = dx * dx + dy * dy;
-        if (d2 < bestD2) { bestD2 = d2; nearest = Math.sqrt(d2); ax = dx; ay = dy; }
+        const dx = d.x - p.x;
+        const dy = d.y - p.y;
+        const r = Math.hypot(dx, dy) || 1;
+
+        sumPx += p.x; sumPy += p.y;
+
+        if (r <= PR) anyInPR = true;
+        if (r < nearest) nearest = r;
+
+        // Quadratic falloff inside pr; zero outside
+        // t = 1 at r=0, t = 0 at r=PR
+        const t = clamp(1 - r / PR, 0, 1);
+        const w = t * t;
+
+        rx += (dx / r) * w;
+        ry += (dy / r) * w;
       }
 
-      if (bestD2 <= PR2) d.panicUntil = now + CONFIG.DUCK.PANIC_COOLDOWN_MS;
+      if (anyInPR) d.panicUntil = now + CONFIG.DUCK.PANIC_COOLDOWN_MS;
 
-      if (d.panicUntil > now && (ax !== 0 || ay !== 0)) {
-        const t = clamp(1 - nearest / PR, 0, 1);
-        const factor = Math.max(minFactor, Math.pow(t, exp));
-        const [nx, ny] = norm2(ax, ay);
-        const targetSpeed = Math.max(minFlee, fleeMax * factor);
-        const tx = nx * targetSpeed, ty = ny * targetSpeed;
-        [d.vx, d.vy] = accelToward(d.vx, d.vy, tx, ty, accelCap);
+      if (d.panicUntil > now) {
+        if (Math.abs(rx) + Math.abs(ry) < 1e-3 && players.length > 1) {
+          const cx = sumPx / players.length;
+          const cy = sumPy / players.length;
+          rx = d.x - cx;
+          ry = d.y - cy;
+        }
+
+        if (rx !== 0 || ry !== 0) {
+          const [nx, ny] = norm2(rx, ry);
+
+          const tNear = clamp(1 - nearest / PR, 0, 1);
+          const factor = Math.max(minFactor, Math.pow(tNear, exp));
+          const targetSpeed = Math.max(minFlee, fleeMax * factor);
+
+          const tx = nx * targetSpeed;
+          const ty = ny * targetSpeed;
+
+          [d.vx, d.vy] = accelToward(d.vx, d.vy, tx, ty, accelCap);
+        }
       }
     }
   }
