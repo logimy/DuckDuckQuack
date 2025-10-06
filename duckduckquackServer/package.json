@@ -1,8 +1,8 @@
 {
   "private": true,
-  "name": "my-app",
+  "name": "duckduckquack-server",
   "version": "1.0.0",
-  "description": "npm init template for bootstrapping an empty Colyseus project",
+  "description": "DuckDuckQuack multiplayer game server built with Colyseus",
   "main": "build/index.js",
   "engines": {
     "node": ">= 20.9.0"
@@ -14,12 +14,9 @@
     "clean": "rimraf build",
     "test": "mocha -r tsx test/**_test.ts --exit --timeout 15000"
   },
-  "author": "",
-  "license": "UNLICENSED",
-  "bugs": {
-    "url": "https://github.com/colyseus/create-colyseus/issues"
-  },
-  "homepage": "https://github.com/colyseus/create-colyseus#readme",
+  "author": "DuckDuckQuack Team",
+  "license": "MIT",
+  "keywords": ["game", "multiplayer", "colyseus", "websocket", "real-time"],
   "devDependencies": {
     "@colyseus/loadtest": "^0.16.0",
     "@colyseus/testing": "^0.16.0",

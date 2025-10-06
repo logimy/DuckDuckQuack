@@ -1,7 +1,9 @@
 import Phaser from "phaser";
 import { CONFIG } from "../config";
 
-/** Self-contained overlay (build, show/hide, resize, destroy). */
+/**
+ * Self-contained help overlay with show/hide animations and responsive positioning
+ */
 export class HelpOverlay {
   private scene: Phaser.Scene;
   private container?: Phaser.GameObjects.Container;
@@ -18,8 +20,13 @@ export class HelpOverlay {
   create(initialLocked: boolean) {
     const { add, cameras, scale } = this.scene;
 
-    const padH = 14, padV = 8, gap = 10;
-    const style: Phaser.Types.GameObjects.Text.TextStyle = {
+    const paddingHorizontal = 14;
+    const paddingVertical = 8;
+    const gap = 10;
+    const borderRadius = 12;
+    const targetIconHeight = 24;
+    
+    const textStyle: Phaser.Types.GameObjects.Text.TextStyle = {
       fontFamily: "system-ui, Arial, sans-serif",
       fontSize: "16px",
       color: "#f0f0f0",
@@ -28,38 +35,59 @@ export class HelpOverlay {
       shadow: { offsetX: 0, offsetY: 2, blur: 0, color: "#000", fill: true },
     };
 
-    const left = add.text(0, 0, "Click", style).setOrigin(0, 0.5);
+    // Create text elements
+    const leftText = add.text(0, 0, "Click", textStyle).setOrigin(0, 0.5);
     const icon = add.image(0, 0, CONFIG.assets.lmb).setOrigin(0, 0.5);
-    const targetH = 24, s = targetH / icon.height; icon.setScale(s);
-    const right = add.text(0, 0, "inside game field to move", style).setOrigin(0, 0.5);
+    const rightText = add.text(0, 0, "inside game field to move", textStyle).setOrigin(0, 0.5);
 
-    const rowW = left.width + gap + icon.displayWidth + gap + right.width;
-    const rowH = Math.max(left.height, targetH, right.height);
+    // Scale icon to target height
+    const iconScale = targetIconHeight / icon.height;
+    icon.setScale(iconScale);
 
-    const bg = add.graphics();
-    const totalW = rowW + padH * 2, totalH = rowH + padV * 2, r = 12;
-    bg.fillStyle(0x000000, 0.55);
-    bg.lineStyle(2, 0xffffff, 0.08);
-    bg.fillRoundedRect(-totalW/2, -totalH/2, totalW, totalH, r);
-    bg.strokeRoundedRect(-totalW/2, -totalH/2, totalW, totalH, r);
+    // Calculate dimensions
+    const rowWidth = leftText.width + gap + icon.displayWidth + gap + rightText.width;
+    const rowHeight = Math.max(leftText.height, targetIconHeight, rightText.height);
+    const totalWidth = rowWidth + paddingHorizontal * 2;
+    const totalHeight = rowHeight + paddingVertical * 2;
 
-    let x = -rowW / 2
-    const y = 0;
-    left.setPosition(x, y); x += left.width + gap;
-    icon.setPosition(x, y); x += icon.displayWidth + gap;
-    right.setPosition(x, y);
+    // Create background
+    const background = add.graphics();
+    background.fillStyle(0x000000, 0.55);
+    background.lineStyle(2, 0xffffff, 0.08);
+    background.fillRoundedRect(-totalWidth / 2, -totalHeight / 2, totalWidth, totalHeight, borderRadius);
+    background.strokeRoundedRect(-totalWidth / 2, -totalHeight / 2, totalWidth, totalHeight, borderRadius);
 
-    this.container = add.container(cameras.main.centerX, cameras.main.height - 64, [bg, left, icon, right])
-      .setDepth(200).setScrollFactor(0);
+    // Position elements
+    let currentX = -rowWidth / 2;
+    const currentY = 0;
+    
+    leftText.setPosition(currentX, currentY);
+    currentX += leftText.width + gap;
+    
+    icon.setPosition(currentX, currentY);
+    currentX += icon.displayWidth + gap;
+    
+    rightText.setPosition(currentX, currentY);
 
-    scale.on("resize", (gs: Phaser.Structs.Size) => {
-      this.container?.setPosition(gs.width / 2, gs.height - 64);
+    // Create container
+    this.container = add.container(
+      cameras.main.centerX, 
+      cameras.main.height - 64, 
+      [background, leftText, icon, rightText]
+    ).setDepth(200).setScrollFactor(0);
+
+    // Handle resize
+    scale.on("resize", (gameSize: Phaser.Structs.Size) => {
+      this.container?.setPosition(gameSize.width / 2, gameSize.height - 64);
     });
 
-    // start state
+    // Set initial visibility
     this.setVisible(!initialLocked, true);
   }
 
+  /**
+   * Shows or hides the overlay with optional animation
+   */
   setVisible(visible: boolean, instant = false) {
     if (!this.container) return;
     this.tween?.remove();
@@ -68,17 +96,29 @@ export class HelpOverlay {
       this.container.setAlpha(visible ? 1 : 0).setVisible(visible);
       return;
     }
+    
     if (visible) {
       this.container.setVisible(true);
-      this.tween = this.scene.tweens.add({ targets: this.container, alpha: 1, duration: 100, ease: "Sine.easeInOut" });
+      this.tween = this.scene.tweens.add({ 
+        targets: this.container, 
+        alpha: 1, 
+        duration: 100, 
+        ease: "Sine.easeInOut" 
+      });
     } else {
       this.tween = this.scene.tweens.add({
-        targets: this.container, alpha: 0, duration: 100, ease: "Sine.easeInOut",
+        targets: this.container, 
+        alpha: 0, 
+        duration: 100, 
+        ease: "Sine.easeInOut",
         onComplete: () => this.container?.setVisible(false)
       });
     }
   }
 
+  /**
+   * Destroys the overlay and cleans up resources
+   */
   destroy() {
     this.tween?.remove();
     this.container?.destroy();

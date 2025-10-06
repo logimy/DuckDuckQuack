@@ -1,39 +1,79 @@
 import Phaser from "phaser";
 import type { PlayerSprite } from "../types";
 
-/** Renders a dashed tether line between player and cursor with distance-based alpha. */
+/**
+ * Renders a dashed tether line between player and cursor with distance-based alpha
+ */
 export class TetherSystem {
   private scene: Phaser.Scene;
-  private gfx?: Phaser.GameObjects.Graphics;
+  private graphics?: Phaser.GameObjects.Graphics;
   private player?: PlayerSprite;
-  private alphaCfg = { min: 0.25, max: 0.85, start: 8, end: 140 };
+  private readonly alphaConfig = { 
+    min: 0.25, 
+    max: 0.85, 
+    start: 8, 
+    end: 140 
+  };
 
-  constructor(scene: Phaser.Scene) { this.scene = scene; }
-  setPlayer(p?: PlayerSprite) { this.player = p; }
-
-  hide() { this.gfx?.setVisible(false); this.gfx?.clear(); }
-
-  drawTo(cx: number, cy: number) {
-    if (!this.player) return this.hide();
-    const px = this.player.x, py = this.player.y;
-    const d = Math.hypot(cx - px, cy - py);
-    const t = Phaser.Math.Clamp((d - this.alphaCfg.start) / Math.max(1, this.alphaCfg.end - this.alphaCfg.start), 0, 0.2);
-    const a = Phaser.Math.Linear(this.alphaCfg.min, this.alphaCfg.max, t);
-
-    const g = this.gfx ?? (this.gfx = this.scene.add.graphics().setDepth(90));
-    g.setVisible(true).setAlpha(a).clear().lineStyle(2, 0xffffff, 1).beginPath();
-
-    const dx = cx - px, dy = cy - py, dist = Math.max(1, d);
-    const nx = dx / dist, ny = dy / dist;
-    const dash = 8, gap = 6, seg = dash + gap;
-
-    for (let s = 0; s < dist; s += seg) {
-      const len = Math.min(dash, dist - s);
-      g.moveTo(px + nx * s, py + ny * s);
-      g.lineTo(px + nx * (s + len), py + ny * (s + len));
-    }
-    g.strokePath();
+  constructor(scene: Phaser.Scene) { 
+    this.scene = scene; 
   }
 
-  destroy() { this.gfx?.destroy(); this.gfx = undefined; }
+  setPlayer(player?: PlayerSprite) { 
+    this.player = player; 
+  }
+
+  hide() { 
+    this.graphics?.setVisible(false); 
+    this.graphics?.clear(); 
+  }
+
+  /**
+   * Draws a dashed line from player to cursor position
+   */
+  drawTo(cursorX: number, cursorY: number) {
+    if (!this.player) return this.hide();
+    
+    const playerX = this.player.x;
+    const playerY = this.player.y;
+    const distance = Math.hypot(cursorX - playerX, cursorY - playerY);
+    
+    const alphaT = Phaser.Math.Clamp(
+      (distance - this.alphaConfig.start) / Math.max(1, this.alphaConfig.end - this.alphaConfig.start), 
+      0, 
+      0.2
+    );
+    const alpha = Phaser.Math.Linear(this.alphaConfig.min, this.alphaConfig.max, alphaT);
+
+    const graphics = this.graphics ?? (this.graphics = this.scene.add.graphics().setDepth(90));
+    graphics.setVisible(true).setAlpha(alpha).clear().lineStyle(2, 0xffffff, 1).beginPath();
+
+    const deltaX = cursorX - playerX;
+    const deltaY = cursorY - playerY;
+    const normalizedDistance = Math.max(1, distance);
+    const normalizedX = deltaX / normalizedDistance;
+    const normalizedY = deltaY / normalizedDistance;
+    
+    const dashLength = 8;
+    const gapLength = 6;
+    const segmentLength = dashLength + gapLength;
+
+    for (let segment = 0; segment < distance; segment += segmentLength) {
+      const currentDashLength = Math.min(dashLength, distance - segment);
+      graphics.moveTo(
+        playerX + normalizedX * segment, 
+        playerY + normalizedY * segment
+      );
+      graphics.lineTo(
+        playerX + normalizedX * (segment + currentDashLength), 
+        playerY + normalizedY * (segment + currentDashLength)
+      );
+    }
+    graphics.strokePath();
+  }
+
+  destroy() { 
+    this.graphics?.destroy(); 
+    this.graphics = undefined; 
+  }
 }

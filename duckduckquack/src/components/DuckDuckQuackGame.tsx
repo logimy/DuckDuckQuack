@@ -1,21 +1,25 @@
 import { useEffect, useRef } from "react";
 import { createPhaserGame } from "../phaser/createGame";
 
-export default function DuckDuckQuackGame() {
+interface DuckDuckQuackGameProps {
+  roomCode: string;
+}
+
+/**
+ * Game container component that initializes and manages the Phaser game instance
+ */
+export default function DuckDuckQuackGame({ roomCode }: DuckDuckQuackGameProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!containerRef.current) return;
 
-    let game = createPhaserGame(containerRef.current);
+    const game = createPhaserGame(containerRef.current, roomCode);
 
     return () => {
-      if (game) {
-        game.destroy(true);
-        game = null;
-      }
+      game.destroy(true);
     };
-  }, []);
+  }, [roomCode]);
 
   return (
     <div

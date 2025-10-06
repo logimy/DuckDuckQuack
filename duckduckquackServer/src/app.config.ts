@@ -1,52 +1,41 @@
 import config from "@colyseus/tools";
 import { monitor } from "@colyseus/monitor";
 import { playground } from "@colyseus/playground";
-
-/**
- * Import your Room files
- */
 import { MyRoom } from "./rooms/MyRoom";
 
 export default config({
-
     initializeGameServer: (gameServer) => {
-        /**
-         * Define your room handlers:
-         */
+        // Define room handler for DuckDuckQuack game
         gameServer.define('my_room', MyRoom);
-        // gameServer.simulateLatency(200);
-
     },
 
     initializeExpress: (app) => {
-        /**
-         * Bind your custom express routes here:
-         * Read more: https://expressjs.com/en/starter/basic-routing.html
-         */
+        // Health check endpoint
         app.get("/hello_world", (req, res) => {
             res.send("It's time to kick ass and chew bubblegum!");
         });
 
-        /**
-         * Use @colyseus/playground
-         * (It is not recommended to expose this route in a production environment)
-         */
+        // Room lookup API - get room ID by room code
+        app.get("/room/:roomCode", (req, res) => {
+            const roomCode = req.params.roomCode;
+            const roomId = MyRoom.getRoomIdByCode(roomCode);
+            
+            res.json({ 
+                roomId: roomId || null, 
+                exists: !!roomId 
+            });
+        });
+
+        // Development tools (disabled in production)
         if (process.env.NODE_ENV !== "production") {
             app.use("/", playground());
         }
 
-        /**
-         * Use @colyseus/monitor
-         * It is recommended to protect this route with a password
-         * Read more: https://docs.colyseus.io/tools/monitor/#restrict-access-to-the-panel-using-a-password
-         */
+        // Server monitoring dashboard
         app.use("/monitor", monitor());
     },
 
-
     beforeListen: () => {
-        /**
-         * Before before gameServer.listen() is called.
-         */
+        // Pre-server initialization hook
     }
 });

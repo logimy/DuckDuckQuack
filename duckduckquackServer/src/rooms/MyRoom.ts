@@ -1,27 +1,36 @@
 import { Room, Client } from "@colyseus/core";
 import { MyRoomState, Player, Duck } from "./schema/MyRoomState";
 
-/** ====================== Config & Types ====================== */
+// ====================== Types & Configuration ======================
+
 type InputVec = { vx: number; vy: number };
+
+interface Group {
+  id: number;
+  members: string[];
+  size: number;
+  cx: number;
+  cy: number;
+  vx: number;
+  vy: number;
+  targetId?: number;
+  lockUntil: number;
+}
 
 const CONFIG = {
   WORLD: { WIDTH: 800, HEIGHT: 800 },
-  NET:   { FIXED_HZ: 60 },
-
-  MOVE:  { MAX_SPEED_PER_TICK: 7, EPS: 1e-6 },
-
+  NET: { FIXED_HZ: 60 },
+  MOVE: { MAX_SPEED_PER_TICK: 7, EPS: 1e-6 },
   DUCK: {
     RADIUS: 10,
     SPEED_SOLO: 0.4,
     SPEED_GROUP_EQUAL: 0.05,
     SPEED_GROUP_BIGGER: 0.1,
     SPEED_FLEE: 7,
-
     MAX_ACCEL: 0.15,
     FLEE_ACCEL: 0.35,
     FLEE_EASE_EXP: 2.0,
     FLEE_MIN_FACTOR: 0.0,
-
     MERGE_RADIUS: 16,
     STICK_RADIUS: 26,
     BORDER_BUFFER: 30,
@@ -34,41 +43,94 @@ const CONFIG = {
   },
 } as const;
 
-type Group = {
-  id: number;
-  members: string[];
-  size: number;
-  cx: number; cy: number;
-  vx: number; vy: number;
-  targetId?: number;
-  lockUntil: number;
+const NICKNAME_REGEX = /^[A-Za-z0-9_-]{3,16}$/;
+
+const MESSAGE_TYPES = {
+  INPUT: 0 as const,
+  SET_NICK: 1 as const,
 };
 
-/** ====================== Small helpers ====================== */
+// ====================== Utility Functions ======================
+
 const hypot = Math.hypot;
-const clamp = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi : v);
-const norm2 = (x: number, y: number) => {
-  const m = hypot(x, y) || 1;
-  return [x / m, y / m, m] as const;
+
+const clamp = (value: number, min: number, max: number): number => 
+  Math.min(Math.max(value, min), max);
+
+const normalize = (x: number, y: number): [number, number, number] => {
+  const magnitude = hypot(x, y) || 1;
+  return [x / magnitude, y / magnitude, magnitude];
 };
-const accelToward = (vx: number, vy: number, tx: number, ty: number, cap: number) => {
-  let ax = tx - vx, ay = ty - vy;
-  const a = hypot(ax, ay);
-  if (a > cap) { const k = cap / a; ax *= k; ay *= k; }
-  return [vx + ax, vy + ay] as const;
+
+const accelerateToward = (vx: number, vy: number, targetX: number, targetY: number, maxAccel: number): [number, number] => {
+  let ax = targetX - vx;
+  let ay = targetY - vy;
+  const acceleration = hypot(ax, ay);
+  
+  if (acceleration > maxAccel) {
+    const scale = maxAccel / acceleration;
+    ax *= scale;
+    ay *= scale;
+  }
+  
+  return [vx + ax, vy + ay];
 };
 
 export class MyRoom extends Room<MyRoomState> {
   maxClients = 4;
+  private roomCode?: string;
+  private static roomMap = new Map<string, string>(); // roomCode -> roomId
 
   private elapsedCarry = 0;
-  private groupSeq = 1;
+  private groupSequence = 1;
 
-  /** ====================== Lifecycle ====================== */
-  onCreate(): void {
+  // ====================== Room Lifecycle ======================
+
+  onCreate(options?: any): void {
     this.setState(new MyRoomState());
+    this.roomCode = options?.roomCode;
+    
+    console.log('Room created:', { roomCode: this.roomCode, roomId: this.roomId });
+    
+    if (this.roomCode) {
+      MyRoom.roomMap.set(this.roomCode, this.roomId);
+    }
+    
     this.spawnInitialDucks();
+    this.setupSimulation();
+    this.setupMessageHandlers();
+  }
 
+  onJoin(client: Client, options?: any): void {
+    console.log('Player joined:', { roomCode: this.roomCode, clientId: client.sessionId });
+    
+    const player = new Player();
+    player.x = Math.floor(Math.random() * CONFIG.WORLD.WIDTH);
+    player.y = Math.floor(Math.random() * CONFIG.WORLD.HEIGHT);
+    
+    const nickname = typeof options?.nickname === "string" ? options.nickname.trim() : "";
+    player.nickname = NICKNAME_REGEX.test(nickname) ? nickname : "";
+    
+    this.state.players.set(client.sessionId, player);
+  }
+
+  onLeave(client: Client): void {
+    this.state.players.delete(client.sessionId);
+  }
+
+  onDispose(): void {
+    if (this.roomCode) {
+      MyRoom.roomMap.delete(this.roomCode);
+    }
+  }
+  
+  static getRoomIdByCode(roomCode: string): string | undefined {
+    return MyRoom.roomMap.get(roomCode);
+  }
+
+  // ====================== Setup Methods ======================
+
+  private setupSimulation(): void {
     const step = 1000 / CONFIG.NET.FIXED_HZ;
     this.setSimulationInterval((dt) => {
       this.elapsedCarry += dt;
@@ -77,330 +139,475 @@ export class MyRoom extends Room<MyRoomState> {
         this.fixedTick();
       }
     });
-
-    this.onMessage<InputVec>(0, (client, payload) => this.handleInput(client, payload));
   }
 
-  onJoin(client: Client): void {
-    const p = new Player();
-    p.x = Math.floor(Math.random() * CONFIG.WORLD.WIDTH);
-    p.y = Math.floor(Math.random() * CONFIG.WORLD.HEIGHT);
-    this.state.players.set(client.sessionId, p);
+  private setupMessageHandlers(): void {
+    this.onMessage<InputVec>(MESSAGE_TYPES.INPUT, (client, payload) => 
+      this.handleInput(client, payload));
+
+    this.onMessage<string>(MESSAGE_TYPES.SET_NICK, (client, nickname) => {
+      const player = this.state.players.get(client.sessionId);
+      if (!player || typeof nickname !== "string") return;
+      
+      const trimmed = nickname.trim();
+      if (NICKNAME_REGEX.test(trimmed)) {
+        player.nickname = trimmed;
+      }
+    });
   }
 
-  onLeave(client: Client): void {
-    this.state.players.delete(client.sessionId);
-  }
-
-  onDispose(): void {
-    /* noop */
-  }
-
-  /** ====================== Players ====================== */
+  // ====================== Player Management ======================
   private handleInput(client: Client, payload?: Partial<InputVec>): void {
-    const p = this.state.players.get(client.sessionId);
-    if (!p) return;
+    const player = this.state.players.get(client.sessionId);
+    if (!player) return;
 
-    const vx = Number(payload?.vx), vy = Number(payload?.vy);
+    const vx = Number(payload?.vx);
+    const vy = Number(payload?.vy);
+    
     if (!Number.isFinite(vx) || !Number.isFinite(vy)) return;
 
-    const q = p.inputQueue as InputVec[];
-    q.push({ vx, vy });
-    if (q.length > 4) q.splice(0, q.length - 4);
+    const inputQueue = player.inputQueue as InputVec[];
+    inputQueue.push({ vx, vy });
+    
+    // Keep only the latest 4 inputs
+    if (inputQueue.length > 4) {
+      inputQueue.splice(0, inputQueue.length - 4);
+    }
   }
 
-  private dequeueLatestInput(p: Player): InputVec | undefined {
-    const q = p.inputQueue as InputVec[];
-    return q.pop();
+  private dequeueLatestInput(player: Player): InputVec | undefined {
+    const inputQueue = player.inputQueue as InputVec[];
+    return inputQueue.pop();
   }
 
   private sanitizeInput({ vx, vy }: InputVec): InputVec {
-    const mag = hypot(vx, vy);
-    if (mag < CONFIG.MOVE.EPS) return { vx: 0, vy: 0 };
-    if (mag > CONFIG.MOVE.MAX_SPEED_PER_TICK) {
-      const k = CONFIG.MOVE.MAX_SPEED_PER_TICK / mag;
-      return { vx: vx * k, vy: vy * k };
+    const magnitude = hypot(vx, vy);
+    
+    if (magnitude < CONFIG.MOVE.EPS) {
+      return { vx: 0, vy: 0 };
     }
+    
+    if (magnitude > CONFIG.MOVE.MAX_SPEED_PER_TICK) {
+      const scale = CONFIG.MOVE.MAX_SPEED_PER_TICK / magnitude;
+      return { vx: vx * scale, vy: vy * scale };
+    }
+    
     return { vx, vy };
   }
 
-  private movePlayer(p: Player, vx: number, vy: number) {
-    p.x += vx; p.y += vy;
-    this.clampToWorld(p);
+  private movePlayer(player: Player, vx: number, vy: number): void {
+    player.x += vx;
+    player.y += vy;
+    this.clampToWorld(player);
   }
 
-  private clampToWorld(p: Player): void {
-    const { WIDTH: W, HEIGHT: H } = CONFIG.WORLD;
-    p.x = clamp(p.x, 0, W);
-    p.y = clamp(p.y, 0, H);
+  private clampToWorld(player: Player): void {
+    const { WIDTH, HEIGHT } = CONFIG.WORLD;
+    player.x = clamp(player.x, 0, WIDTH);
+    player.y = clamp(player.y, 0, HEIGHT);
   }
 
-  /** ====================== Ducks: spawn & grouping ====================== */
+  // ====================== Duck Management ======================
+
   private spawnInitialDucks(): void {
-    const { WIDTH: W, HEIGHT: H } = CONFIG.WORLD;
-    const cx = W / 2, cy = H / 2;
-    const jitter = CONFIG.DUCK.START_SPREAD;
+    const { WIDTH, HEIGHT } = CONFIG.WORLD;
+    const centerX = WIDTH / 2;
+    const centerY = HEIGHT / 2;
+    const spread = CONFIG.DUCK.START_SPREAD;
 
     for (const color of CONFIG.DUCK.COLORS) {
       for (let i = 0; i < CONFIG.DUCK.START_PER_COLOR; i++) {
-        const d = new Duck();
-        d.color = color;
-        d.x = cx + (Math.random() * 2 - 1) * jitter;
-        d.y = cy + (Math.random() * 2 - 1) * jitter;
-        d.vx = 0; d.vy = 0; d.panicUntil = 0;
-        this.state.ducks.set(`${color}-${i}-${Math.random().toString(36).slice(2, 6)}`, d);
+        const duck = new Duck();
+        duck.color = color;
+        duck.x = centerX + (Math.random() * 2 - 1) * spread;
+        duck.y = centerY + (Math.random() * 2 - 1) * spread;
+        duck.vx = 0;
+        duck.vy = 0;
+        duck.panicUntil = 0;
+        
+        const duckId = `${color}-${i}-${Math.random().toString(36).slice(2, 6)}`;
+        this.state.ducks.set(duckId, duck);
       }
     }
   }
 
-  /** Connected components by STICK_RADIUS (panicking ducks are excluded) */
-  private buildGroups(now: number): Group[] {
-    const keys = Array.from(this.state.ducks.keys());
-    const seen = new Set<string>();
+  private buildGroups(currentTime: number): Group[] {
+    const duckKeys = Array.from(this.state.ducks.keys());
+    const visited = new Set<string>();
     const groups: Group[] = [];
-    const R2 = CONFIG.DUCK.STICK_RADIUS * CONFIG.DUCK.STICK_RADIUS;
+    const stickRadiusSquared = CONFIG.DUCK.STICK_RADIUS * CONFIG.DUCK.STICK_RADIUS;
 
-    for (let i = 0; i < keys.length; i++) {
-      const k = keys[i];
-      if (seen.has(k)) continue;
-      const d0 = this.state.ducks.get(k)!;
-      if (d0.panicUntil > now) { seen.add(k); continue; }
+    for (const duckKey of duckKeys) {
+      if (visited.has(duckKey)) continue;
+      
+      const duck = this.state.ducks.get(duckKey)!;
+      if (duck.panicUntil > currentTime) {
+        visited.add(duckKey);
+        continue;
+      }
 
-      const q = [k];
+      const queue = [duckKey];
       const members: string[] = [];
-      seen.add(k);
+      visited.add(duckKey);
 
-      while (q.length) {
-        const dk = q.pop()!;
-        const di = this.state.ducks.get(dk)!;
-        if (di.panicUntil > now) continue;
+      // Flood fill to find connected ducks
+      while (queue.length > 0) {
+        const currentKey = queue.pop()!;
+        const currentDuck = this.state.ducks.get(currentKey)!;
+        
+        if (currentDuck.panicUntil > currentTime) continue;
 
-        members.push(dk);
+        members.push(currentKey);
 
-        for (let j = 0; j < keys.length; j++) {
-          const nk = keys[j];
-          if (seen.has(nk)) continue;
-          const dj = this.state.ducks.get(nk)!;
-          if (dj.panicUntil > now) continue;
+        // Check all other ducks for connectivity
+        for (const otherKey of duckKeys) {
+          if (visited.has(otherKey)) continue;
+          
+          const otherDuck = this.state.ducks.get(otherKey)!;
+          if (otherDuck.panicUntil > currentTime) continue;
 
-          const dx = dj.x - di.x, dy = dj.y - di.y;
-          if (dx * dx + dy * dy <= R2) {
-            seen.add(nk);
-            q.push(nk);
+          const dx = otherDuck.x - currentDuck.x;
+          const dy = otherDuck.y - currentDuck.y;
+          const distanceSquared = dx * dx + dy * dy;
+          
+          if (distanceSquared <= stickRadiusSquared) {
+            visited.add(otherKey);
+            queue.push(otherKey);
           }
         }
       }
 
+      // Create group if we have at least 2 ducks
       if (members.length >= 2) {
-        let sx = 0, sy = 0;
-        for (const mk of members) { const m = this.state.ducks.get(mk)!; sx += m.x; sy += m.y; }
-        const cx = sx / members.length, cy = sy / members.length;
-        groups.push({ id: this.groupSeq++, members, size: members.length, cx, cy, vx: 0, vy: 0, lockUntil: 0 });
+        let sumX = 0, sumY = 0;
+        for (const memberKey of members) {
+          const member = this.state.ducks.get(memberKey)!;
+          sumX += member.x;
+          sumY += member.y;
+        }
+        
+        const centerX = sumX / members.length;
+        const centerY = sumY / members.length;
+        
+        groups.push({
+          id: this.groupSequence++,
+          members,
+          size: members.length,
+          cx: centerX,
+          cy: centerY,
+          vx: 0,
+          vy: 0,
+          lockUntil: 0
+        });
       }
     }
+    
     return groups;
   }
 
-  /** Nearest group with size >= mine (tie: larger size, then lower id) */
-  private chooseTargetGroup(me: Group, groups: Group[], now: number): Group | undefined {
-    let best: Group | undefined;
-    let bestD2 = Infinity;
+  private chooseTargetGroup(myGroup: Group, allGroups: Group[]): Group | undefined {
+    let bestTarget: Group | undefined;
+    let bestDistanceSquared = Infinity;
 
-    for (const g of groups) {
-      if (g.id === me.id || g.size < me.size) continue;
-      const dx = g.cx - me.cx, dy = g.cy - me.cy;
-      const d2 = dx * dx + dy * dy;
+    for (const group of allGroups) {
+      if (group.id === myGroup.id || group.size < myGroup.size) continue;
+      
+      const dx = group.cx - myGroup.cx;
+      const dy = group.cy - myGroup.cy;
+      const distanceSquared = dx * dx + dy * dy;
 
-      if (d2 < bestD2) { bestD2 = d2; best = g; }
-      else if (d2 === bestD2 && best && (g.size > best.size || (g.size === best.size && g.id < best.id))) {
-        best = g;
+      if (distanceSquared < bestDistanceSquared) {
+        bestDistanceSquared = distanceSquared;
+        bestTarget = group;
+      } else if (distanceSquared === bestDistanceSquared && bestTarget) {
+        // Tie-breaker: prefer larger groups, then lower ID
+        if (group.size > bestTarget.size || 
+            (group.size === bestTarget.size && group.id < bestTarget.id)) {
+          bestTarget = group;
+        }
       }
     }
-    return best;
+    
+    return bestTarget;
   }
 
-  /** ====================== Ducks: physics & AI ====================== */
-  private applyPerDuckFlee(now: number): void {
+  // ====================== Duck AI & Physics ======================
+
+  private applyFleeBehavior(currentTime: number): void {
     const players = Array.from(this.state.players.values());
-    if (!players.length) return;
+    if (players.length === 0) return;
 
-    const PR = CONFIG.DUCK.PANIC_RADIUS;
-    const fleeMax = CONFIG.DUCK.SPEED_FLEE;
-    const accelCap = CONFIG.DUCK.FLEE_ACCEL;
-    const exp = CONFIG.DUCK.FLEE_EASE_EXP;
-    const minFactor = CONFIG.DUCK.FLEE_MIN_FACTOR;
-    const minFlee = CONFIG.DUCK.SPEED_SOLO;
+    const panicRadius = CONFIG.DUCK.PANIC_RADIUS;
+    const maxFleeSpeed = CONFIG.DUCK.SPEED_FLEE;
+    const maxAcceleration = CONFIG.DUCK.FLEE_ACCEL;
+    const easeExponent = CONFIG.DUCK.FLEE_EASE_EXP;
+    const minFleeFactor = CONFIG.DUCK.FLEE_MIN_FACTOR;
+    const minFleeSpeed = CONFIG.DUCK.SPEED_SOLO;
 
-    for (const d of this.state.ducks.values()) {
-      let rx = 0, ry = 0;
-      let nearest = Infinity;
-      let anyInPR = false;
+    for (const duck of this.state.ducks.values()) {
+      let fleeX = 0, fleeY = 0;
+      let nearestPlayerDistance = Infinity;
+      let anyPlayerInPanicRadius = false;
+      let playerCenterX = 0, playerCenterY = 0;
 
-      let sumPx = 0, sumPy = 0;
+      // Calculate flee vector from all players
+      for (const player of players) {
+        const dx = duck.x - player.x;
+        const dy = duck.y - player.y;
+        const distance = hypot(dx, dy) || 1;
 
-      for (const p of players) {
-        const dx = d.x - p.x;
-        const dy = d.y - p.y;
-        const r = Math.hypot(dx, dy) || 1;
+        playerCenterX += player.x;
+        playerCenterY += player.y;
 
-        sumPx += p.x; sumPy += p.y;
-
-        if (r <= PR) anyInPR = true;
-        if (r < nearest) nearest = r;
-
-        // Quadratic falloff inside pr; zero outside
-        // t = 1 at r=0, t = 0 at r=PR
-        const t = clamp(1 - r / PR, 0, 1);
-        const w = t * t;
-
-        rx += (dx / r) * w;
-        ry += (dy / r) * w;
-      }
-
-      if (anyInPR) d.panicUntil = now + CONFIG.DUCK.PANIC_COOLDOWN_MS;
-
-      if (d.panicUntil > now) {
-        if (Math.abs(rx) + Math.abs(ry) < 1e-3 && players.length > 1) {
-          const cx = sumPx / players.length;
-          const cy = sumPy / players.length;
-          rx = d.x - cx;
-          ry = d.y - cy;
+        if (distance <= panicRadius) {
+          anyPlayerInPanicRadius = true;
+        }
+        
+        if (distance < nearestPlayerDistance) {
+          nearestPlayerDistance = distance;
         }
 
-        if (rx !== 0 || ry !== 0) {
-          const [nx, ny] = norm2(rx, ry);
+        // Quadratic falloff: full strength at distance 0, zero at panic radius
+        const normalizedDistance = clamp(1 - distance / panicRadius, 0, 1);
+        const weight = normalizedDistance * normalizedDistance;
 
-          const tNear = clamp(1 - nearest / PR, 0, 1);
-          const factor = Math.max(minFactor, Math.pow(tNear, exp));
-          const targetSpeed = Math.max(minFlee, fleeMax * factor);
+        fleeX += (dx / distance) * weight;
+        fleeY += (dy / distance) * weight;
+      }
 
-          const tx = nx * targetSpeed;
-          const ty = ny * targetSpeed;
+      // Set panic state if any player is in panic radius
+      if (anyPlayerInPanicRadius) {
+        duck.panicUntil = currentTime + CONFIG.DUCK.PANIC_COOLDOWN_MS;
+      }
 
-          [d.vx, d.vy] = accelToward(d.vx, d.vy, tx, ty, accelCap);
+      // Apply flee behavior if duck is panicking
+      if (duck.panicUntil > currentTime) {
+        // If flee vector is too small and multiple players exist, flee from center
+        if (Math.abs(fleeX) + Math.abs(fleeY) < 1e-3 && players.length > 1) {
+          const centerX = playerCenterX / players.length;
+          const centerY = playerCenterY / players.length;
+          fleeX = duck.x - centerX;
+          fleeY = duck.y - centerY;
+        }
+
+        if (fleeX !== 0 || fleeY !== 0) {
+          const [normalizedX, normalizedY] = normalize(fleeX, fleeY);
+
+          // Calculate flee speed based on distance to nearest player
+          const normalizedNearestDistance = clamp(1 - nearestPlayerDistance / panicRadius, 0, 1);
+          const fleeFactor = Math.max(minFleeFactor, Math.pow(normalizedNearestDistance, easeExponent));
+          const targetSpeed = Math.max(minFleeSpeed, maxFleeSpeed * fleeFactor);
+
+          const targetVelocityX = normalizedX * targetSpeed;
+          const targetVelocityY = normalizedY * targetSpeed;
+
+          [duck.vx, duck.vy] = accelerateToward(duck.vx, duck.vy, targetVelocityX, targetVelocityY, maxAcceleration);
         }
       }
     }
   }
 
-  /** Push apart overlapping ducks, apply border bias & clamps */
-  private resolveDuckCollisionsAndBorders(): void {
-    const keys = Array.from(this.state.ducks.keys());
-    const R = CONFIG.DUCK.RADIUS;
-    const sumR = R * 2, sumR2 = sumR * sumR;
-    const { WIDTH: W, HEIGHT: H } = CONFIG.WORLD;
-    const B = CONFIG.DUCK.BORDER_BUFFER;
+  private resolveCollisionsAndBorders(): void {
+    const duckKeys = Array.from(this.state.ducks.keys());
+    const duckRadius = CONFIG.DUCK.RADIUS;
+    const collisionDistance = duckRadius * 2;
+    const collisionDistanceSquared = collisionDistance * collisionDistance;
+    const { WIDTH, HEIGHT } = CONFIG.WORLD;
+    const borderBuffer = CONFIG.DUCK.BORDER_BUFFER;
 
+    // Multiple passes for stable collision resolution
     for (let pass = 0; pass < 2; pass++) {
-      for (let i = 0; i < keys.length; i++) {
-        const ki = keys[i], di = this.state.ducks.get(ki)!;
+      for (let i = 0; i < duckKeys.length; i++) {
+        const duckKey1 = duckKeys[i];
+        const duck1 = this.state.ducks.get(duckKey1)!;
 
-        // duck-duck separation
-        for (let j = i + 1; j < keys.length; j++) {
-          const kj = keys[j], dj = this.state.ducks.get(kj)!;
-          const dx = dj.x - di.x, dy = dj.y - di.y, d2 = dx * dx + dy * dy;
-          if (d2 > 0 && d2 < sumR2) {
-            const d = Math.sqrt(d2) || 1;
-            const overlap = sumR - d;
-            const nx = dx / d, ny = dy / d;
-            const push = overlap * 0.5;
-            di.x -= nx * push; di.y -= ny * push;
-            dj.x += nx * push; dj.y += ny * push;
+        // Duck-to-duck collision separation
+        for (let j = i + 1; j < duckKeys.length; j++) {
+          const duckKey2 = duckKeys[j];
+          const duck2 = this.state.ducks.get(duckKey2)!;
+          
+          const dx = duck2.x - duck1.x;
+          const dy = duck2.y - duck1.y;
+          const distanceSquared = dx * dx + dy * dy;
+          
+          if (distanceSquared > 0 && distanceSquared < collisionDistanceSquared) {
+            const distance = Math.sqrt(distanceSquared) || 1;
+            const overlap = collisionDistance - distance;
+            const normalX = dx / distance;
+            const normalY = dy / distance;
+            const pushForce = overlap * 0.5;
+            
+            duck1.x -= normalX * pushForce;
+            duck1.y -= normalY * pushForce;
+            duck2.x += normalX * pushForce;
+            duck2.y += normalY * pushForce;
           }
         }
 
-        // soft inward bias
-        if (di.x < B) di.vx += (B - di.x) * 0.01;
-        else if (di.x > W - B) di.vx -= (di.x - (W - B)) * 0.01;
-        if (di.y < B) di.vy += (B - di.y) * 0.01;
-        else if (di.y > H - B) di.vy -= (di.y - (H - B)) * 0.01;
+        // Soft border bias (gentle push toward center)
+        if (duck1.x < borderBuffer) {
+          duck1.vx += (borderBuffer - duck1.x) * 0.01;
+        } else if (duck1.x > WIDTH - borderBuffer) {
+          duck1.vx -= (duck1.x - (WIDTH - borderBuffer)) * 0.01;
+        }
+        
+        if (duck1.y < borderBuffer) {
+          duck1.vy += (borderBuffer - duck1.y) * 0.01;
+        } else if (duck1.y > HEIGHT - borderBuffer) {
+          duck1.vy -= (duck1.y - (HEIGHT - borderBuffer)) * 0.01;
+        }
 
-        // hard clamp + damp outward velocity
-        if (di.x < R) { di.x = R; if (di.vx < 0) di.vx *= 0.3; }
-        if (di.x > W - R) { di.x = W - R; if (di.vx > 0) di.vx *= 0.3; }
-        if (di.y < R) { di.y = R; if (di.vy < 0) di.vy *= 0.3; }
-        if (di.y > H - R) { di.y = H - R; if (di.vy > 0) di.vy *= 0.3; }
+        // Hard border clamping with velocity damping
+        if (duck1.x < duckRadius) {
+          duck1.x = duckRadius;
+          if (duck1.vx < 0) duck1.vx *= 0.3;
+        }
+        if (duck1.x > WIDTH - duckRadius) {
+          duck1.x = WIDTH - duckRadius;
+          if (duck1.vx > 0) duck1.vx *= 0.3;
+        }
+        
+        if (duck1.y < duckRadius) {
+          duck1.y = duckRadius;
+          if (duck1.vy < 0) duck1.vy *= 0.3;
+        }
+        if (duck1.y > HEIGHT - duckRadius) {
+          duck1.y = HEIGHT - duckRadius;
+          if (duck1.vy > 0) duck1.vy *= 0.3;
+        }
       }
     }
   }
 
-  /** ====================== Fixed update ====================== */
+  // ====================== Main Game Loop ======================
+
   private fixedTick(): void {
-    const now = Date.now();
+    const currentTime = Date.now();
 
-    // 1) Players
-    this.state.players.forEach((p) => {
-      const input = this.dequeueLatestInput(p);
+    // 1. Process player input and movement
+    this.processPlayerMovement();
+
+    // 2. Apply duck flee behavior from players
+    this.applyFleeBehavior(currentTime);
+
+    // 3. Build duck groups (excluding panicking ducks)
+    const groups = this.buildGroups(currentTime);
+
+    // 4. Set group movement targets and velocities
+    this.updateGroupBehavior(groups, currentTime);
+
+    // 5. Handle solo duck seeking behavior
+    this.updateSoloDuckBehavior(groups, currentTime);
+
+    // 6. Apply group velocities to member ducks
+    this.applyGroupVelocities(groups, currentTime);
+
+    // 7. Integrate duck positions
+    this.integrateDuckPositions();
+
+    // 8. Resolve collisions and border constraints
+    this.resolveCollisionsAndBorders();
+  }
+
+  private processPlayerMovement(): void {
+    this.state.players.forEach((player) => {
+      const input = this.dequeueLatestInput(player);
       if (!input) return;
+      
       const { vx, vy } = this.sanitizeInput(input);
-      this.movePlayer(p, vx, vy);
+      this.movePlayer(player, vx, vy);
     });
+  }
 
-    // 2) Ducks: per-duck flee
-    this.applyPerDuckFlee(now);
+  private updateGroupBehavior(groups: Group[], currentTime: number): void {
+    for (const group of groups) {
+      if (group.lockUntil > currentTime) continue;
+      
+      const target = this.chooseTargetGroup(group, groups);
+      if (!target) {
+        group.vx = 0;
+        group.vy = 0;
+        group.targetId = undefined;
+        continue;
+      }
 
-    // 3) Groups (exclude panicking ducks)
-    const groups = this.buildGroups(now);
-
-    // set group goals/velocities
-    for (const g of groups) {
-      if (g.lockUntil > now) continue;
-      const tgt = this.chooseTargetGroup(g, groups, now);
-      if (!tgt) { g.vx = 0; g.vy = 0; g.targetId = undefined; continue; }
-
-      const [nx, ny] = norm2(tgt.cx - g.cx, tgt.cy - g.cy);
-      const same = tgt.size === g.size;
-      const speed = same ? CONFIG.DUCK.SPEED_GROUP_EQUAL : CONFIG.DUCK.SPEED_GROUP_BIGGER;
-      g.vx = nx * speed; g.vy = ny * speed;
-      g.targetId = tgt.id;
-      g.lockUntil = now + CONFIG.DUCK.MERGE_LOCK_MS;
+      const [normalizedX, normalizedY] = normalize(target.cx - group.cx, target.cy - group.cy);
+      const isSameSize = target.size === group.size;
+      const speed = isSameSize ? CONFIG.DUCK.SPEED_GROUP_EQUAL : CONFIG.DUCK.SPEED_GROUP_BIGGER;
+      
+      group.vx = normalizedX * speed;
+      group.vy = normalizedY * speed;
+      group.targetId = target.id;
+      group.lockUntil = currentTime + CONFIG.DUCK.MERGE_LOCK_MS;
     }
+  }
 
-    // 4) Solo seekers (non-panic, non-grouped) chase nearest duck/group
-    const grouped = new Set(groups.flatMap((g) => g.members));
+  private updateSoloDuckBehavior(groups: Group[], currentTime: number): void {
+    const groupedDuckKeys = new Set(groups.flatMap((group) => group.members));
     const duckKeys = Array.from(this.state.ducks.keys());
 
-    for (const dk of duckKeys) {
-      const d = this.state.ducks.get(dk)!;
-      if (d.panicUntil > now || grouped.has(dk)) continue;
+    for (const duckKey of duckKeys) {
+      const duck = this.state.ducks.get(duckKey)!;
+      if (duck.panicUntil > currentTime || groupedDuckKeys.has(duckKey)) continue;
 
-      let bestX = 0, bestY = 0, bestD2 = Infinity;
+      let bestTargetX = 0, bestTargetY = 0, bestDistanceSquared = Infinity;
 
-      // nearest non-panicking duck
-      for (const ok of duckKeys) {
-        if (ok === dk) continue;
-        const o = this.state.ducks.get(ok)!;
-        if (o.panicUntil > now) continue;
-        const dx = o.x - d.x, dy = o.y - d.y, d2 = dx * dx + dy * dy;
-        if (d2 < bestD2) { bestD2 = d2; bestX = dx; bestY = dy; }
+      // Find nearest non-panicking duck
+      for (const otherKey of duckKeys) {
+        if (otherKey === duckKey) continue;
+        
+        const otherDuck = this.state.ducks.get(otherKey)!;
+        if (otherDuck.panicUntil > currentTime) continue;
+        
+        const dx = otherDuck.x - duck.x;
+        const dy = otherDuck.y - duck.y;
+        const distanceSquared = dx * dx + dy * dy;
+        
+        if (distanceSquared < bestDistanceSquared) {
+          bestDistanceSquared = distanceSquared;
+          bestTargetX = dx;
+          bestTargetY = dy;
+        }
       }
-      // nearest group centroid
-      for (const g of groups) {
-        const dx = g.cx - d.x, dy = g.cy - d.y, d2 = dx * dx + dy * dy;
-        if (d2 < bestD2) { bestD2 = d2; bestX = dx; bestY = dy; }
+
+      // Find nearest group centroid
+      for (const group of groups) {
+        const dx = group.cx - duck.x;
+        const dy = group.cy - duck.y;
+        const distanceSquared = dx * dx + dy * dy;
+        
+        if (distanceSquared < bestDistanceSquared) {
+          bestDistanceSquared = distanceSquared;
+          bestTargetX = dx;
+          bestTargetY = dy;
+        }
       }
 
-      if (bestD2 < Infinity) {
-        const [nx, ny] = norm2(bestX, bestY);
-        const tx = nx * CONFIG.DUCK.SPEED_SOLO;
-        const ty = ny * CONFIG.DUCK.SPEED_SOLO;
-        [d.vx, d.vy] = accelToward(d.vx, d.vy, tx, ty, CONFIG.DUCK.MAX_ACCEL);
+      if (bestDistanceSquared < Infinity) {
+        const [normalizedX, normalizedY] = normalize(bestTargetX, bestTargetY);
+        const targetVelocityX = normalizedX * CONFIG.DUCK.SPEED_SOLO;
+        const targetVelocityY = normalizedY * CONFIG.DUCK.SPEED_SOLO;
+        
+        [duck.vx, duck.vy] = accelerateToward(duck.vx, duck.vy, targetVelocityX, targetVelocityY, CONFIG.DUCK.MAX_ACCEL);
       }
     }
+  }
 
-    // 5) Apply group velocities to members (panicking members ignore)
-    for (const g of groups) {
-      for (const mk of g.members) {
-        const m = this.state.ducks.get(mk)!;
-        if (m.panicUntil > now) continue;
-        [m.vx, m.vy] = accelToward(m.vx, m.vy, g.vx, g.vy, CONFIG.DUCK.MAX_ACCEL);
+  private applyGroupVelocities(groups: Group[], currentTime: number): void {
+    for (const group of groups) {
+      for (const memberKey of group.members) {
+        const member = this.state.ducks.get(memberKey)!;
+        if (member.panicUntil > currentTime) continue;
+        
+        [member.vx, member.vy] = accelerateToward(member.vx, member.vy, group.vx, group.vy, CONFIG.DUCK.MAX_ACCEL);
       }
     }
+  }
 
-    // 6) Integrate duck positions
-    for (const d of this.state.ducks.values()) { d.x += d.vx; d.y += d.vy; }
-
-    // 7) Collisions & borders
-    this.resolveDuckCollisionsAndBorders();
+  private integrateDuckPositions(): void {
+    for (const duck of this.state.ducks.values()) {
+      duck.x += duck.vx;
+      duck.y += duck.vy;
+    }
   }
 }

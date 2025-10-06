@@ -1,81 +1,182 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-/* Ducks rendering & client-side smoothing */
 import Phaser from "phaser";
 import { CONFIG } from "../config";
 
+/**
+ * Duck view data for client-side rendering and smoothing
+ */
 export type DuckView = {
   node: Phaser.GameObjects.Arc;
   tx: number;
   ty: number;
+  panicUntil?: number;     // Server-sent panic window timestamp
+  nextQuackAt?: number;    // Local schedule for next quack sound
 };
 
+/**
+ * Manages duck rendering, smoothing, and audio effects
+ */
 export class DucksLayer {
   private scene: Phaser.Scene;
   private views: Record<string, DuckView> = {};
+  private readonly quackKeys = ["quack01", "quack02", "quack03"];
 
   constructor(scene: Phaser.Scene) {
     this.scene = scene;
   }
 
+  /**
+   * Adds a new duck to the scene
+   */
   onAdd = (key: string, duck: any) => {
-    const c = this.scene.add.circle(
+    const circle = this.scene.add.circle(
       duck.x,
       duck.y,
       CONFIG.ducks.radius,
       colorToHex(duck.color),
       1
     );
-    c.setStrokeStyle(1, 0x000000, 0.5);
-    c.setDepth(CONFIG.ducks.depth);
-    this.views[key] = { node: c, tx: duck.x, ty: duck.y };
+    circle.setStrokeStyle(1, 0x000000, 0.5);
+    circle.setDepth(CONFIG.ducks.depth);
+    
+    this.views[key] = {
+      node: circle,
+      tx: duck.x,
+      ty: duck.y,
+      panicUntil: duck.panicUntil ?? 0,
+      nextQuackAt: undefined,
+    };
     this.applyVisual(key, duck);
   };
 
+  /**
+   * Updates duck position and state
+   */
   onChange = (key: string, duck: any) => {
-    const v = this.views[key];
-    if (!v) return;
-    v.tx = duck.x;
-    v.ty = duck.y;
+    const view = this.views[key];
+    if (!view) return;
+    
+    view.tx = duck.x;
+    view.ty = duck.y;
+    view.panicUntil = duck.panicUntil ?? 0;
     this.applyVisual(key, duck);
   };
 
+  /**
+   * Removes a duck from the scene
+   */
   onRemove = (key: string) => {
-    const v = this.views[key];
-    if (!v) return;
-    v.node.destroy();
+    const view = this.views[key];
+    if (!view) return;
+    
+    view.node.destroy();
     delete this.views[key];
   };
 
-  /** Lerp all duck visuals toward latest server coords */
+  /**
+   * Smoothly interpolates all duck visuals toward server coordinates
+   */
   tickLerp(alpha = CONFIG.ducks.lerpAlpha) {
-    for (const v of Object.values(this.views)) {
-      const nx = Phaser.Math.Linear(v.node.x, v.tx, alpha);
-      const ny = Phaser.Math.Linear(v.node.y, v.ty, alpha);
-      v.node.setPosition(nx, ny);
+    for (const view of Object.values(this.views)) {
+      const newX = Phaser.Math.Linear(view.node.x, view.tx, alpha);
+      const newY = Phaser.Math.Linear(view.node.y, view.ty, alpha);
+      view.node.setPosition(newX, newY);
     }
   }
 
-  clear() {
-    for (const k of Object.keys(this.views)) this.onRemove(k);
-  }
-
-  private applyVisual(key: string, duck: any) {
-    const v = this.views[key];
-    if (!v) return;
+  /**
+   * Plays quack sounds for panicking ducks with random timing
+   */
+  tickAudio() {
     const now = Date.now();
-    if (duck.panicUntil && duck.panicUntil > now) {
-      const pulse = 1 + 0.06 * Math.sin(now / 60);
-      v.node.setScale(pulse);
-      v.node.setAlpha(0.95);
-    } else {
-      v.node.setScale(1);
-      v.node.setAlpha(1);
+  
+    for (const view of Object.values(this.views)) {
+      const isPanicking = !!(view.panicUntil && view.panicUntil > now);
+      
+      if (!isPanicking) {
+        // Reset schedule when panic ends
+        view.nextQuackAt = undefined;
+        continue;
+      }
+  
+      if (view.nextQuackAt === undefined) {
+        // First frame after entering panic - quack immediately
+        this.playQuackFor(view);
+        view.nextQuackAt = now + this.randInt(500, 1500);
+        continue;
+      }
+  
+      if (now >= view.nextQuackAt) {
+        this.playQuackFor(view);
+        view.nextQuackAt = now + this.randInt(500, 1500);
+      }
     }
+  }
+
+  /**
+   * Removes all ducks from the scene
+   */
+  clear() {
+    for (const key of Object.keys(this.views)) {
+      this.onRemove(key);
+    }
+  }
+
+  /**
+   * Applies visual effects based on duck state (panic animation)
+   */
+  private applyVisual(key: string, duck: any) {
+    const view = this.views[key];
+    if (!view) return;
+    
+    const now = Date.now();
+    const isPanicking = duck.panicUntil && duck.panicUntil > now;
+    
+    if (isPanicking) {
+      const pulse = 1 + 0.06 * Math.sin(now / 60);
+      view.node.setScale(pulse);
+      view.node.setAlpha(0.95);
+    } else {
+      view.node.setScale(1);
+      view.node.setAlpha(1);
+    }
+  }
+
+  /**
+   * Plays a quack sound with randomized parameters for natural variation
+   */
+  private playQuackFor(view: DuckView) {
+    const key = this.quackKeys[(Math.random() * this.quackKeys.length) | 0];
+  
+    // Randomize audio parameters for natural variation
+    const volume = 0.08 + Math.random() * 0.07;  // 0.08-0.15
+    const rate = 0.9 + Math.random() * 0.25;     // 0.9-1.15 (speed + pitch)
+    const detune = (Math.random() * 400 - 200) | 0; // ±200 cents
+  
+    // Stereo pan based on duck position
+    const pan = Phaser.Math.Clamp(
+      (view.node.x / CONFIG.world.width) * 2 - 1,
+      -1, 1
+    ) * 0.6;
+  
+    const sound = this.scene.sound.add(key, { volume, rate, detune });
+    (sound as any).setPan?.(pan);
+  
+    sound.once("complete", () => sound.destroy());
+    sound.play();
+  }
+
+  /**
+   * Generates a random integer between min and max (inclusive)
+   */
+  private randInt(minMs: number, maxMs: number): number {
+    return (Math.random() * (maxMs - minMs) + minMs) | 0;
   }
 }
 
-/* ---------- utils ---------- */
-
+/**
+ * Converts color name to hex value
+ */
 function colorToHex(color: string): number {
   switch (color) {
     case "red":    return 0xff4d4f;

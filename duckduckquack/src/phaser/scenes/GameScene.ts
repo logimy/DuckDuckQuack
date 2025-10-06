@@ -3,6 +3,8 @@ import Phaser from "phaser";
 import { CONFIG } from "../config";
 import type { PlayerMap, PlayerSprite, Vec2 } from "../types";
 import { HelpOverlay } from "../ui/HelpOverlay";
+import { SoundToggle } from "../ui/SoundToggle";
+import { RoomCodeDisplay } from "../ui/RoomCodeDisplay";
 import { CursorSystem } from "../systems/CursorSystem";
 import { TetherSystem } from "../systems/TetherSystem";
 import { MovementSystem } from "../systems/MovementSystem";
@@ -10,235 +12,399 @@ import { ReconcileSystem } from "../systems/ReconcileSystem";
 import { interpolateRemotes } from "../systems/RemoteInterpolationSystem";
 import { ColyseusBridge } from "../net/ColyseusBridge";
 import { DucksLayer } from "../entities/ducks";
+import { NicknameOverlay } from "../ui/NicknameOverlay";
+import quack01Url from "../../assets/sfx/quack01.ogg?url";
+import quack02Url from "../../assets/sfx/quack02.ogg?url";
+import quack03Url from "../../assets/sfx/quack03.ogg?url";
+
+/**
+ * Main game scene that handles player movement, networking, and UI
+ */
 
 export class GameScene extends Phaser.Scene {
-  // Net & entities
+  // Networking and entities
   private net = new ColyseusBridge();
   private players: PlayerMap = {};
-  private me?: PlayerSprite;
-  private remoteRef?: Phaser.GameObjects.Rectangle;
+  private localPlayer?: PlayerSprite;
+  private remoteReference?: Phaser.GameObjects.Rectangle;
 
-  // Systems / UI
-  private help!: HelpOverlay;
-  private cursor!: CursorSystem;
-  private tether!: TetherSystem;
-  private move!: MovementSystem;
-  private reconcile!: ReconcileSystem;
+  // Game systems
+  private helpOverlay!: HelpOverlay;
+  private cursorSystem!: CursorSystem;
+  private tetherSystem!: TetherSystem;
+  private movementSystem!: MovementSystem;
+  private reconcileSystem!: ReconcileSystem;
+  private nicknameOverlay!: NicknameOverlay;
 
-  // Ducks visuals
-  private ducks!: DucksLayer;
+  // Duck rendering
+  private ducksLayer!: DucksLayer;
 
-  // Pointer-lock & virtual cursor
-  private isLocked = false;
+  // Input state
+  private isPointerLocked = false;
   private virtualCursor: Vec2 = { x: 0, y: 0 };
 
-  // Fixed step
-  private readonly fixedStep = 1000 / CONFIG.net.fixedHz;
-  private acc = 0;
+  // UI components
+  private soundToggle!: SoundToggle;
+  private roomCodeDisplay!: RoomCodeDisplay;
 
-  /* ------------------------------ Lifecycle ------------------------------ */
+  // Fixed timestep simulation
+  private readonly fixedTimestep = 1000 / CONFIG.net.fixedHz;
+  private accumulatedTime = 0;
 
+  /**
+   * Preloads audio assets and UI components
+   */
   preload() {
-    this.load.image(CONFIG.assets.ship, CONFIG.assets.shipUrl);
-    this.help = new HelpOverlay(this);
-    this.help.preload();
+    this.load.audio("quack01", quack01Url);
+    this.load.audio("quack02", quack02Url);
+    this.load.audio("quack03", quack03Url);
+    
+    this.helpOverlay = new HelpOverlay(this);
+    this.helpOverlay.preload();
   }
 
+  /**
+   * Initializes the game scene with systems, UI, and input handling
+   */
   async create() {
-    this.cursor = new CursorSystem(this);
-    this.tether = new TetherSystem(this);
-    this.move = new MovementSystem();
-    this.reconcile = new ReconcileSystem();
-    this.ducks = new DucksLayer(this);
+    this.initializeSystems();
+    this.initializeUI();
+    this.initializeInput();
+    this.initializeNicknameGate();
+  }
 
-    // Initial lock state
-    this.isLocked = this.isCanvasLocked();
-    this.move.setLocked(this.isLocked);
+  /**
+   * Initializes all game systems
+   */
+  private initializeSystems() {
+    this.cursorSystem = new CursorSystem(this);
+    this.tetherSystem = new TetherSystem(this);
+    this.movementSystem = new MovementSystem();
+    this.reconcileSystem = new ReconcileSystem();
+    this.ducksLayer = new DucksLayer(this);
+
+    // Set initial pointer lock state
+    this.isPointerLocked = this.isCanvasLocked();
+    this.movementSystem.setLocked(this.isPointerLocked);
     this.updateUnlockedClass();
+  }
 
-    // UI
-    this.help.create(this.isLocked);
+  /**
+   * Initializes UI components
+   */
+  private initializeUI() {
+    this.helpOverlay.create(this.isPointerLocked);
+    // Keep help hidden until the local player actually spawns
+    this.helpOverlay.setVisible(false, true);
 
-    // Net (players + ducks)
-    await this.net.connect(
-      this,
-      this.players,
-      {
-        onLocalJoin: (sprite) => this.onLocalJoin(sprite),
-        onLocalUpdate: (x, y) => this.onLocalUpdate(x, y),
-        onRemoteJoin: () => {},
-        onRemoteUpdate: (id, x, y) => this.onRemoteUpdate(id, x, y),
-        onRemoteLeave: (id) => this.onRemoteLeave(id),
-      },
-      {
-        onAdd: this.ducks.onAdd,
-        onChange: this.ducks.onChange,
-        onRemove: this.ducks.onRemove,
-      }
-    );
-    this.net.onLeave(() => this.cleanup());
+    this.soundToggle = new SoundToggle(this);
+    const initialMuted = localStorage.getItem("ddq_sound_muted") === "1";
+    this.soundToggle.create(initialMuted, () => this.isPointerLocked, this.isPointerLocked);
 
-    // Input
+    this.roomCodeDisplay = new RoomCodeDisplay(this);
+    this.roomCodeDisplay.create(() => this.isPointerLocked, this.isPointerLocked);
+    
+    // Initially hide room code display until player spawns
+    this.roomCodeDisplay.setVisible(false, true);
+  }
+
+  /**
+   * Initializes input handling
+   */
+  private initializeInput() {
     this.wirePointerLock();
     this.wirePointerMove();
 
     // Blur releases lock and halts smoothing
     this.game.events.on(Phaser.Core.Events.BLUR, () => {
       if (this.isCanvasLocked()) document.exitPointerLock();
-      this.move.setLocked(false);
+      this.movementSystem.setLocked(false);
     });
   }
 
-  update(_t: number, dt: number) {
-    if (!this.me) return;
-    this.acc += dt;
-    while (this.acc >= this.fixedStep) {
-      this.acc -= this.fixedStep;
+  /**
+   * Initializes nickname input gate
+   */
+  private initializeNicknameGate() {
+    this.nicknameOverlay = new NicknameOverlay(this);
+    const savedNickname = localStorage.getItem("ddq_nick");
+    this.nicknameOverlay.create(savedNickname, async (finalNickname) => {
+      // Persist chosen nickname
+      localStorage.setItem("ddq_nick", finalNickname);
+      await this.connectToNetwork(finalNickname);
+    });
+  }
 
-      const v = this.move.step();
-      this.net.sendVelocity(v.x, v.y);
+  /**
+   * Connects to the network with the given nickname
+   */
+  private async connectToNetwork(nickname: string) {
+    const roomCode = this.game.registry.get('roomCode') as string;
+    await this.net.connect(
+      this,
+      this.players,
+      {
+        onLocalJoin: (sprite) => this.onLocalPlayerJoin(sprite),
+        onLocalUpdate: (x, y) => this.onLocalPlayerUpdate(x, y),
+        onRemoteJoin: () => {},
+        onRemoteUpdate: (id, x, y) => this.onRemotePlayerUpdate(id, x, y),
+        onRemoteLeave: (id) => this.onRemotePlayerLeave(id),
+      },
+      {
+        onAdd: this.ducksLayer.onAdd,
+        onChange: this.ducksLayer.onChange,
+        onRemove: this.ducksLayer.onRemove,
+      },
+      nickname,
+      roomCode
+    );
+    this.net.onLeave(() => this.cleanup());
+  }
 
-      this.reconcile.step();
-
-      this.cursor.updateOpacity();
-      const cp = this.cursor.position;
-      if (this.isLocked && cp) this.tether.drawTo(cp.x, cp.y);
-
-      interpolateRemotes(this.players, this.net.sessionId);
-
-      // Ducks smoothing
-      this.ducks.tickLerp(CONFIG.ducks.lerpAlpha);
+  /**
+   * Main update loop with fixed timestep simulation
+   */
+  update(_time: number, deltaTime: number) {
+    if (!this.localPlayer) return;
+    
+    this.accumulatedTime += deltaTime;
+    while (this.accumulatedTime >= this.fixedTimestep) {
+      this.accumulatedTime -= this.fixedTimestep;
+      this.fixedUpdate();
     }
   }
 
-  /* ------------------------------ Net Hooks ------------------------------ */
+  /**
+   * Fixed timestep update for consistent physics and networking
+   */
+  private fixedUpdate() {
+    // Process player movement
+    const velocity = this.movementSystem.step();
+    this.net.sendVelocity(velocity.x, velocity.y);
 
-  private onLocalJoin(sprite: PlayerSprite) {
-    this.me = sprite;
+    // Reconcile with server position
+    this.reconcileSystem.step();
 
-    this.cursor.setPlayer(sprite);
-    this.tether.setPlayer(sprite);
-    this.move.setPlayer(sprite);
-    this.reconcile.setPlayer(sprite);
+    // Update cursor and tether
+    this.cursorSystem.updateOpacity();
+    const cursorPosition = this.cursorSystem.position;
+    if (this.isPointerLocked && cursorPosition) {
+      this.tetherSystem.drawTo(cursorPosition.x, cursorPosition.y);
+    }
 
-    this.remoteRef = this.add
+    // Interpolate remote players
+    interpolateRemotes(this.players, this.net.sessionId);
+
+    // Update duck visuals and audio
+    this.ducksLayer.tickLerp(CONFIG.ducks.lerpAlpha);
+    this.ducksLayer.tickAudio();
+  }
+
+  /* ------------------------------ Network Event Handlers ------------------------------ */
+
+  /**
+   * Handles local player joining the game
+   */
+  private onLocalPlayerJoin(sprite: PlayerSprite) {
+    this.localPlayer = sprite;
+
+    // Set up systems for local player
+    this.cursorSystem.setPlayer(sprite);
+    this.tetherSystem.setPlayer(sprite);
+    this.movementSystem.setPlayer(sprite);
+    this.reconcileSystem.setPlayer(sprite);
+
+    // Create debug reference for server position
+    this.remoteReference = this.add
       .rectangle(0, 0, sprite.width, sprite.height)
       .setStrokeStyle(1, 0xff0000)
       .setDepth(91);
 
-    if (this.isLocked) this.initCursorAtPointer();
-    else this.hideCursorAndTether();
-  }
+    // Show help if unlocked now that we spawned
+    this.helpOverlay.setVisible(!this.isPointerLocked);
 
-  private onLocalUpdate(x: number, y: number) {
-    this.reconcile.setServerPos(x, y);
-    if (this.remoteRef) {
-      this.remoteRef.x = x;
-      this.remoteRef.y = y;
+    // Hide spawn button once we've spawned
+    this.nicknameOverlay?.["spawnBtn"]?.setVisible(false, true);
+    
+    // Show room code display now that spawn button is hidden
+    this.roomCodeDisplay.setVisible(!this.isPointerLocked, true);
+
+    if (this.isPointerLocked) {
+      this.initializeCursorAtPointer();
+    } else {
+      this.hideCursorAndTether();
     }
   }
 
-  private onRemoteUpdate(id: string, x: number, y: number) {
-    const s = this.players[id];
-    if (!s) return;
-    s.setData("serverX", x);
-    s.setData("serverY", y);
+  /**
+   * Handles local player position updates from server
+   */
+  private onLocalPlayerUpdate(x: number, y: number) {
+    this.reconcileSystem.setServerPos(x, y);
+    if (this.remoteReference) {
+      this.remoteReference.x = x;
+      this.remoteReference.y = y;
+    }
   }
 
-  private onRemoteLeave(id: string) {
-    this.players[id]?.destroy();
-    delete this.players[id];
+  /**
+   * Handles remote player position updates
+   */
+  private onRemotePlayerUpdate(playerId: string, x: number, y: number) {
+    const player = this.players[playerId];
+    if (!player) return;
+    player.setData("serverX", x);
+    player.setData("serverY", y);
   }
 
-  /* ------------------------------ Input ------------------------------ */
+  /**
+   * Handles remote player leaving the game
+   */
+  private onRemotePlayerLeave(playerId: string) {
+    this.players[playerId]?.destroy();
+    delete this.players[playerId];
+  }
 
+  /* ------------------------------ Input Handling ------------------------------ */
+
+  /**
+   * Sets up pointer lock functionality
+   */
   private wirePointerLock() {
-    this.input.on("pointerdown", (p: Phaser.Input.Pointer) => {
-      if (!p.leftButtonDown()) return;
+    this.input.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
+      if (!pointer.leftButtonDown()) return;
       const canvas = this.game.canvas as HTMLCanvasElement;
-      if (this.isCanvasLocked()) document.exitPointerLock();
-      else canvas.requestPointerLock?.();
+      if (this.isCanvasLocked()) {
+        document.exitPointerLock();
+      } else {
+        canvas.requestPointerLock?.();
+      }
     });
 
     document.addEventListener("pointerlockchange", () => {
-      this.setLocked(this.isCanvasLocked());
+      this.setPointerLocked(this.isCanvasLocked());
     });
   }
 
+  /**
+   * Sets up pointer movement handling
+   */
   private wirePointerMove() {
     this.input.on("pointermove", (pointer: Phaser.Input.Pointer) => {
-      const cam = this.cameras.main;
-      if (this.isLocked) {
-        const dx = pointer.movementX / cam.zoom;
-        const dy = pointer.movementY / cam.zoom;
+      const camera = this.cameras.main;
+      
+      if (this.isPointerLocked) {
+        // Handle locked pointer movement
+        const deltaX = pointer.movementX / camera.zoom;
+        const deltaY = pointer.movementY / camera.zoom;
 
         this.virtualCursor.x = Phaser.Math.Clamp(
-          this.virtualCursor.x + dx,
-          0,
+          this.virtualCursor.x + deltaX, 
+          0, 
           CONFIG.world.width
         );
         this.virtualCursor.y = Phaser.Math.Clamp(
-          this.virtualCursor.y + dy,
-          0,
+          this.virtualCursor.y + deltaY, 
+          0, 
           CONFIG.world.height
         );
 
-        this.move.setMouseWorld(this.virtualCursor.x, this.virtualCursor.y);
-        this.cursor.showAt(this.virtualCursor.x, this.virtualCursor.y);
-        this.tether.drawTo(this.virtualCursor.x, this.virtualCursor.y);
+        this.movementSystem.setMouseWorld(this.virtualCursor.x, this.virtualCursor.y);
+        this.cursorSystem.showAt(this.virtualCursor.x, this.virtualCursor.y);
+        this.tetherSystem.drawTo(this.virtualCursor.x, this.virtualCursor.y);
       } else {
-        const p = cam.getWorldPoint(pointer.x, pointer.y);
-        this.move.setMouseWorld(p.x, p.y);
+        // Handle unlocked pointer movement
+        const worldPoint = camera.getWorldPoint(pointer.x, pointer.y);
+        this.movementSystem.setMouseWorld(worldPoint.x, worldPoint.y);
         this.hideCursorAndTether();
       }
     });
   }
 
-  /* ------------------------------ Lock Helpers ------------------------------ */
+  /* ------------------------------ Pointer Lock Helpers ------------------------------ */
 
+  /**
+   * Checks if the canvas has pointer lock
+   */
   private isCanvasLocked(): boolean {
     return document.pointerLockElement === this.game.canvas;
   }
 
-  private setLocked(locked: boolean) {
-    this.isLocked = locked;
-    this.move.setLocked(locked);
-    this.help.setVisible(!locked);
+  /**
+   * Sets the pointer lock state and updates UI accordingly
+   */
+  private setPointerLocked(locked: boolean) {
+    this.isPointerLocked = locked;
+    this.movementSystem.setLocked(locked);
+
+    // Only show help post-spawn
+    const shouldShowHelp = !locked && !!this.localPlayer;
+    this.helpOverlay.setVisible(shouldShowHelp);
+
+    this.soundToggle?.setVisible(!locked);
+    // Only show room code display when unlocked AND player has spawned
+    this.roomCodeDisplay?.setVisible(!locked && !!this.localPlayer);
     this.updateUnlockedClass();
 
-    if (locked && this.me) this.initCursorAtPointer();
-    else this.hideCursorAndTether();
+    if (locked && this.localPlayer) {
+      this.initializeCursorAtPointer();
+    } else {
+      this.hideCursorAndTether();
+    }
   }
 
-  private initCursorAtPointer() {
+  /**
+   * Initializes cursor position at current pointer location
+   */
+  private initializeCursorAtPointer() {
     this.virtualCursor.x = this.input.activePointer.worldX;
     this.virtualCursor.y = this.input.activePointer.worldY;
-    this.cursor.showAt(this.virtualCursor.x, this.virtualCursor.y);
+    this.cursorSystem.showAt(this.virtualCursor.x, this.virtualCursor.y);
   }
 
+  /**
+   * Hides cursor and tether visuals
+   */
   private hideCursorAndTether() {
-    this.cursor.hide();
-    this.tether.hide();
+    this.cursorSystem.hide();
+    this.tetherSystem.hide();
   }
 
+  /**
+   * Updates the unlocked class on the game container
+   */
   private updateUnlockedClass() {
-    const el = document.getElementById(CONFIG.ui.containerId);
-    if (!el) return;
-    el.classList[this.isLocked ? "remove" : "add"](CONFIG.ui.unlockedClass);
+    const element = document.getElementById(CONFIG.ui.containerId);
+    if (!element) return;
+    element.classList[this.isPointerLocked ? "remove" : "add"](CONFIG.ui.unlockedClass);
   }
 
   /* ------------------------------ Cleanup ------------------------------ */
 
+  /**
+   * Cleans up all resources when leaving the scene
+   */
   private cleanup() {
-    Object.values(this.players).forEach((s) => s?.destroy());
+    // Destroy all player sprites
+    Object.values(this.players).forEach((sprite) => sprite?.destroy());
     this.players = {};
-    this.me = undefined;
-    this.remoteRef?.destroy();
-    this.remoteRef = undefined;
-    this.cursor?.destroy();
-    this.tether?.destroy();
-    this.help?.destroy();
+    this.localPlayer = undefined;
+    
+    // Destroy debug reference
+    this.remoteReference?.destroy();
+    this.remoteReference = undefined;
+    
+    // Destroy systems
+    this.cursorSystem?.destroy();
+    this.tetherSystem?.destroy();
+    
+    // Destroy UI components
+    this.helpOverlay?.destroy();
+    this.soundToggle?.destroy();
+    this.roomCodeDisplay?.destroy();
+    this.nicknameOverlay?.destroy();
 
-    this.ducks?.clear();
+    // Clear ducks
+    this.ducksLayer?.clear();
   }
 }

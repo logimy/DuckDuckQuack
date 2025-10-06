@@ -1,44 +1,81 @@
 import Phaser from "phaser";
 import type { Vec2, PlayerSprite } from "../types";
 
-/** Draws a simple crosshair and manages opacity based on distance to player. */
+/**
+ * Manages cursor crosshair rendering and opacity based on distance to player
+ */
 export class CursorSystem {
   private scene: Phaser.Scene;
-  private gfx?: Phaser.GameObjects.Graphics;
+  private graphics?: Phaser.GameObjects.Graphics;
   private player?: PlayerSprite;
 
-  constructor(scene: Phaser.Scene) { this.scene = scene; }
+  constructor(scene: Phaser.Scene) { 
+    this.scene = scene; 
+  }
 
-  setPlayer(p?: PlayerSprite) { this.player = p; }
-  hide() { this.gfx?.setVisible(false); }
+  setPlayer(player?: PlayerSprite) { 
+    this.player = player; 
+  }
+
+  hide() { 
+    this.graphics?.setVisible(false); 
+  }
+
   showAt(x: number, y: number) {
-    this.ensure();
-    this.gfx!.setVisible(true).setPosition(x, y);
+    this.ensureGraphics();
+    this.graphics!.setVisible(true).setPosition(x, y);
     this.updateOpacity();
   }
 
-  private ensure() {
-    if (this.gfx) return;
-    const g = this.scene.add.graphics();
-    g.lineStyle(2, 0xffffff, 1);
-    g.beginPath(); g.moveTo(-18, 0); g.lineTo(18, 0); g.strokePath();
-    g.beginPath(); g.moveTo(0, -18); g.lineTo(0, 18); g.strokePath();
-    g.setDepth(98);
-    this.gfx = g;
+  /**
+   * Creates the crosshair graphics if they don't exist
+   */
+  private ensureGraphics() {
+    if (this.graphics) return;
+    
+    const graphics = this.scene.add.graphics();
+    graphics.lineStyle(2, 0xffffff, 1);
+    
+    // Draw horizontal line
+    graphics.beginPath(); 
+    graphics.moveTo(-18, 0); 
+    graphics.lineTo(18, 0); 
+    graphics.strokePath();
+    
+    // Draw vertical line
+    graphics.beginPath(); 
+    graphics.moveTo(0, -18); 
+    graphics.lineTo(0, 18); 
+    graphics.strokePath();
+    
+    graphics.setDepth(98);
+    this.graphics = graphics;
   }
 
-  /** Returns alpha for external use if needed. */
+  /**
+   * Updates cursor opacity based on distance to player
+   */
   updateOpacity(): number {
-    if (!this.gfx || !this.player) return 0;
-    const d = Phaser.Math.Distance.Between(this.gfx.x, this.gfx.y, this.player.x, this.player.y);
-    const t = Phaser.Math.Clamp((d - 2) / Math.max(1, 80 - 2), 0.4, 0.8);
-    this.gfx.setAlpha(t);
-    return t;
+    if (!this.graphics || !this.player) return 0;
+    
+    const distance = Phaser.Math.Distance.Between(
+      this.graphics.x, 
+      this.graphics.y, 
+      this.player.x, 
+      this.player.y
+    );
+    
+    const alpha = Phaser.Math.Clamp((distance - 2) / Math.max(1, 80 - 2), 0.4, 0.8);
+    this.graphics.setAlpha(alpha);
+    return alpha;
   }
 
   get position(): Vec2 | undefined {
-    return this.gfx ? { x: this.gfx.x, y: this.gfx.y } : undefined;
+    return this.graphics ? { x: this.graphics.x, y: this.graphics.y } : undefined;
   }
 
-  destroy() { this.gfx?.destroy(); this.gfx = undefined; }
+  destroy() { 
+    this.graphics?.destroy(); 
+    this.graphics = undefined; 
+  }
 }
