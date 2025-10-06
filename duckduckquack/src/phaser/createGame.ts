@@ -15,6 +15,10 @@ export function createPhaserGame(parent: HTMLElement, roomCode: string): Phaser.
     physics: { default: "arcade" },
     pixelArt: true,
     scene: [GameScene],
+    audio: {
+      disableWebAudio: false,
+      context: undefined, // Let Phaser create its own audio context
+    },
   };
 
   const game = new Phaser.Game(gameConfig);

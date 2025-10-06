@@ -56,6 +56,7 @@ export class GameScene extends Phaser.Scene {
     this.initializeUI();
     this.initializeInput();
     this.initializeNicknameGate();
+    this.initializeAudio();
   }
 
   private initializeSystems() {
@@ -103,6 +104,24 @@ export class GameScene extends Phaser.Scene {
       localStorage.setItem("ddq_nick", finalNickname);
       await this.connectToNetwork(finalNickname);
     });
+  }
+
+  private initializeAudio() {
+    // Ensure audio context is ready
+    const webAudioManager = this.sound as any;
+    if (webAudioManager.context && webAudioManager.context.state === 'suspended') {
+      // Audio context is suspended, will be resumed on user interaction
+      webAudioManager.context.resume().catch(console.error);
+    }
+  }
+
+  private resumeAudioContext() {
+    const webAudioManager = this.sound as any;
+    if (webAudioManager.context && webAudioManager.context.state === 'suspended') {
+      webAudioManager.context.resume().then(() => {
+        console.log('Audio context resumed');
+      }).catch(console.error);
+    }
   }
 
   private async connectToNetwork(nickname: string) {
@@ -260,6 +279,9 @@ export class GameScene extends Phaser.Scene {
     
     this.input.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
       if (!pointer.leftButtonDown()) return;
+      // Resume audio context on user interaction
+      this.resumeAudioContext();
+      
       const canvas = this.game.canvas as HTMLCanvasElement;
       if (this.isCanvasLocked()) {
         document.exitPointerLock();
@@ -274,6 +296,8 @@ export class GameScene extends Phaser.Scene {
 
   private handlePointerLockChange = () => {
     this.setPointerLocked(this.isCanvasLocked());
+    // Resume audio context on user interaction
+    this.resumeAudioContext();
   };
 
   private wirePointerMove() {
