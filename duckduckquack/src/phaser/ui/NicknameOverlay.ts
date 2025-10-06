@@ -19,6 +19,7 @@ export class NicknameOverlay {
 
   private isEditing = true;
   private nickname = "";
+  private hasJoined = false;
 
   private onSpawn?: OnSpawn;
   private spawnBtn?: SpawnButton;
@@ -45,7 +46,7 @@ export class NicknameOverlay {
 
     const title = add
       .text(0, -height / 2 + pad, "Type in your nickname", {
-        fontFamily: "system-ui, Arial, sans-serif",
+        fontFamily: "Fredoka, sans-serif",
         fontSize: "18px",
         color: "#c0c0c0",
         stroke: "#000",
@@ -58,7 +59,7 @@ export class NicknameOverlay {
     const baseY = 12;
     const inputText = add
       .text(0, baseY, "", {
-        fontFamily: "system-ui, Arial, sans-serif",
+        fontFamily: "Fredoka, sans-serif",
         fontSize: "22px",
         color: "#ffffff",
         stroke: "#000",
@@ -69,7 +70,7 @@ export class NicknameOverlay {
 
     const editText = add
       .text(0, baseY, "✏️", {
-        fontFamily: "system-ui, Arial, sans-serif",
+        fontFamily: "Fredoka, sans-serif",
         fontSize: "20px",
         color: "#f0f0f0",
         stroke: "#000",
@@ -81,7 +82,7 @@ export class NicknameOverlay {
 
     const checkText = add
       .text(0, baseY, "✅", {
-        fontFamily: "system-ui, Arial, sans-serif",
+        fontFamily: "Fredoka, sans-serif",
         fontSize: "20px",
         color: "#f0f0f0",
         stroke: "#000",
@@ -145,12 +146,12 @@ export class NicknameOverlay {
     });
 
     // Click handlers (stop propagation so GameScene doesn't toggle pointer-lock)
-    inputText.on("pointerdown", (p: Phaser.Input.Pointer, _lx?: number, _ly?: number, ev?: any) => {
+    inputText.on("pointerdown", (_: Phaser.Input.Pointer, _lx?: number, _ly?: number, ev?: any) => {
       ev?.stopPropagation?.();
       if (!this.isEditing) return;
       this.blinkCursor(true);
     });
-    editText.on("pointerdown", (p: Phaser.Input.Pointer, _lx?: number, _ly?: number, ev?: any) => {
+    editText.on("pointerdown", (_: Phaser.Input.Pointer, _lx?: number, _ly?: number, ev?: any) => {
       ev?.stopPropagation?.();
       this.isEditing = true;
       this.updateVisuals();
@@ -168,7 +169,7 @@ export class NicknameOverlay {
       stop(p, lx, ly, ev);
       this.scene.input.setDefaultCursor("default");
     });
-    checkText.on("pointerdown", (p: Phaser.Input.Pointer, _lx?: number, _ly?: number, ev?: any) => {
+    checkText.on("pointerdown", (_: Phaser.Input.Pointer, _lx?: number, _ly?: number, ev?: any) => {
       ev?.stopPropagation?.();
       if (!this.isNicknameValid(this.nickname)) return;
       // "Save" nickname: exit edit mode, show pencil
@@ -191,6 +192,7 @@ export class NicknameOverlay {
     this.spawnBtn = new SpawnButton(this.scene);
     this.spawnBtn.create(() => {
       if (!this.isNicknameValid(this.nickname)) return;
+      this.hasJoined = true;
       this.onSpawn?.(this.nickname.trim());
       this.setVisible(false);
     });
@@ -260,7 +262,7 @@ export class NicknameOverlay {
     
 
     // spawn button visibility
-    const canSpawn = this.isNicknameValid(this.nickname) && !this.isEditing;
+    const canSpawn = this.isNicknameValid(this.nickname) && !this.isEditing && !this.hasJoined;
     this.spawnBtn?.setVisible(canSpawn);
   }
 
@@ -289,6 +291,14 @@ export class NicknameOverlay {
         onComplete: () => this.container?.setVisible(false),
       });
     }
+  }
+
+  /**
+   * Hides the spawn button
+   */
+  hideSpawnButton() {
+    this.hasJoined = true;
+    this.spawnBtn?.setVisible(false, true);
   }
 
   destroy() {

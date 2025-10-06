@@ -1,9 +1,6 @@
 import Phaser from "phaser";
 import { CONFIG } from "../config";
 
-/**
- * Self-contained help overlay with show/hide animations and responsive positioning
- */
 export class HelpOverlay {
   private scene: Phaser.Scene;
   private container?: Phaser.GameObjects.Container;
@@ -27,7 +24,7 @@ export class HelpOverlay {
     const targetIconHeight = 24;
     
     const textStyle: Phaser.Types.GameObjects.Text.TextStyle = {
-      fontFamily: "system-ui, Arial, sans-serif",
+      fontFamily: "Fredoka, sans-serif",
       fontSize: "16px",
       color: "#f0f0f0",
       stroke: "#000",
@@ -35,29 +32,24 @@ export class HelpOverlay {
       shadow: { offsetX: 0, offsetY: 2, blur: 0, color: "#000", fill: true },
     };
 
-    // Create text elements
     const leftText = add.text(0, 0, "Click", textStyle).setOrigin(0, 0.5);
     const icon = add.image(0, 0, CONFIG.assets.lmb).setOrigin(0, 0.5);
     const rightText = add.text(0, 0, "inside game field to move", textStyle).setOrigin(0, 0.5);
 
-    // Scale icon to target height
     const iconScale = targetIconHeight / icon.height;
     icon.setScale(iconScale);
 
-    // Calculate dimensions
     const rowWidth = leftText.width + gap + icon.displayWidth + gap + rightText.width;
     const rowHeight = Math.max(leftText.height, targetIconHeight, rightText.height);
     const totalWidth = rowWidth + paddingHorizontal * 2;
     const totalHeight = rowHeight + paddingVertical * 2;
 
-    // Create background
     const background = add.graphics();
     background.fillStyle(0x000000, 0.55);
     background.lineStyle(2, 0xffffff, 0.08);
     background.fillRoundedRect(-totalWidth / 2, -totalHeight / 2, totalWidth, totalHeight, borderRadius);
     background.strokeRoundedRect(-totalWidth / 2, -totalHeight / 2, totalWidth, totalHeight, borderRadius);
 
-    // Position elements
     let currentX = -rowWidth / 2;
     const currentY = 0;
     
@@ -69,25 +61,19 @@ export class HelpOverlay {
     
     rightText.setPosition(currentX, currentY);
 
-    // Create container
     this.container = add.container(
       cameras.main.centerX, 
       cameras.main.height - 64, 
       [background, leftText, icon, rightText]
     ).setDepth(200).setScrollFactor(0);
 
-    // Handle resize
     scale.on("resize", (gameSize: Phaser.Structs.Size) => {
       this.container?.setPosition(gameSize.width / 2, gameSize.height - 64);
     });
 
-    // Set initial visibility
     this.setVisible(!initialLocked, true);
   }
 
-  /**
-   * Shows or hides the overlay with optional animation
-   */
   setVisible(visible: boolean, instant = false) {
     if (!this.container) return;
     this.tween?.remove();

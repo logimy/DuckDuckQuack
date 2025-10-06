@@ -1,0 +1,241 @@
+.win-screen {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 800px;
+  height: 800px;
+  z-index: 1000;
+  font-family: 'Fredoka', sans-serif;
+  pointer-events: none; /* Allow clicks to pass through to game */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.confetti-container {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 800px;
+  height: 800px;
+  pointer-events: none;
+  z-index: 998;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.confetti-wrapper {
+  width: 800px;
+  height: 800px;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.confetti-wrapper > * {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: fill !important;
+}
+
+.win-content {
+  width: 600px;
+  height: 400px;
+  background: rgba(0, 0, 0, 0.65);
+  border: 2px solid rgba(255, 255, 255, 0.1);
+  border-radius: 14px;
+  padding: 20px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+  overflow: hidden; /* Prevent scrolling to maintain exact 600x400 */
+  pointer-events: auto; /* Re-enable pointer events for the content */
+  box-sizing: border-box; /* Include padding in the 600x400 dimensions */
+  backdrop-filter: blur(10px);
+}
+
+.win-title {
+  color: #f0f0f0;
+  text-align: center;
+  margin: 0;
+  font-size: 18px;
+  font-weight: bold;
+  stroke: #000;
+  strokeThickness: 1;
+  text-shadow: 0px 1px 0px rgba(0, 0, 0, 1);
+  flex-shrink: 0; /* Prevent title from shrinking */
+}
+
+.win-main-content {
+  display: flex;
+  gap: 15px;
+  flex: 1;
+  overflow: hidden;
+}
+
+.section-title {
+  color: #f0f0f0;
+  margin: 0 0 15px 0;
+  font-size: 14px;
+  font-weight: 600;
+  stroke: #000;
+  strokeThickness: 1;
+  text-shadow: 0px 1px 0px rgba(0, 0, 0, 1);
+}
+
+/* Match Time Section */
+.match-time-section {
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 15px;
+  flex: 1; /* Take up left half of the space */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.time-display {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.time-value {
+  font-size: 48px;
+  font-weight: bold;
+  color: #52c41a; /* Green color for time */
+  stroke: #000;
+  strokeThickness: 1;
+  text-shadow: 0px 1px 0px rgba(0, 0, 0, 1);
+  text-align: center;
+}
+
+.time-label {
+  color: #f0f0f0;
+  font-size: 14px;
+  font-weight: 500;
+  stroke: #000;
+  strokeThickness: 1;
+  text-shadow: 0px 1px 0px rgba(0, 0, 0, 1);
+}
+
+/* Players Section */
+.players-section {
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 15px;
+  flex: 1; /* Take up right half of the space */
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.player-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 1;
+  overflow-y: auto;
+}
+
+.no-players {
+  color: #404040;
+  font-style: italic;
+  text-align: center;
+  width: 100%;
+}
+
+.player-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(0, 0, 0, 0.4);
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  flex-shrink: 0;
+}
+
+.player-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #404040;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #f0f0f0;
+  font-weight: bold;
+  font-size: 0.9rem;
+  stroke: #000;
+  strokeThickness: 1;
+  text-shadow: 0px 1px 0px rgba(0, 0, 0, 1);
+  flex-shrink: 0;
+}
+
+.player-name {
+  color: #f0f0f0;
+  font-weight: 500;
+  stroke: #000;
+  strokeThickness: 1;
+  text-shadow: 0px 1px 0px rgba(0, 0, 0, 1);
+}
+
+/* Play Again Section */
+.play-again-section {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.play-again-button {
+  background: linear-gradient(135deg, #52c41a, #389e0d);
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  color: #ffffff;
+  font-size: 16px;
+  font-weight: bold;
+  padding: 12px 24px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  stroke: #000;
+  strokeThickness: 1;
+  text-shadow: 0px 1px 0px rgba(0, 0, 0, 1);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.play-again-button:hover {
+  background: linear-gradient(135deg, #73d13d, #52c41a);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4);
+}
+
+.play-again-button:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+/* Scrollbar Styling */
+.win-content::-webkit-scrollbar {
+  width: 8px;
+}
+
+.win-content::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+}
+
+.win-content::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+}
+
+.win-content::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}

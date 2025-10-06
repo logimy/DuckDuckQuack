@@ -26,7 +26,7 @@ export class SpawnButton {
     const { add, cameras, scale, input } = this.scene;
 
     const textStyle: Phaser.Types.GameObjects.Text.TextStyle = {
-      fontFamily: "system-ui, Arial, sans-serif",
+      fontFamily: "Fredoka, sans-serif",
       fontSize: "18px",
       color: "#f0fff0",
       stroke: "#000",
@@ -103,7 +103,7 @@ export class SpawnButton {
   /**
    * Positions the button at the bottom left of the screen
    */
-  positionToBottomLeft(width: number, height: number) {
+  positionToBottomLeft(_width: number, height: number) {
     if (!this.container) return;
     const halfWidth = this.container.width / 2;
     this.container.setPosition(this.marginLeft + halfWidth, height - this.bottomPadding);

@@ -31,7 +31,7 @@ export class SoundToggle {
     sound.mute = this.isMuted;
 
     const textStyle: Phaser.Types.GameObjects.Text.TextStyle = {
-      fontFamily: "system-ui, Arial, sans-serif",
+      fontFamily: "Fredoka, sans-serif",
       fontSize: "18px",
       color: "#f0f0f0",
       stroke: "#000",

@@ -1,5 +1,5 @@
 import { Room, Client } from "@colyseus/core";
-import { MyRoomState, Player, Duck } from "./schema/MyRoomState";
+import { MyRoomState, Player, Duck, RoomPhase } from "./schema/MyRoomState";
 
 // ====================== Types & Configuration ======================
 
@@ -48,6 +48,8 @@ const NICKNAME_REGEX = /^[A-Za-z0-9_-]{3,16}$/;
 const MESSAGE_TYPES = {
   INPUT: 0 as const,
   SET_NICK: 1 as const,
+  SET_PHASE: 2 as const,
+  SET_GAME_OPTIONS: 3 as const,
 };
 
 // ====================== Utility Functions ======================
@@ -83,6 +85,9 @@ export class MyRoom extends Room<MyRoomState> {
 
   private elapsedCarry = 0;
   private groupSequence = 1;
+  
+  // Track clients that are connected but not spawned
+  private clientData = new Map<string, { nickname: string }>();
 
   // ====================== Room Lifecycle ======================
 
@@ -90,32 +95,34 @@ export class MyRoom extends Room<MyRoomState> {
     this.setState(new MyRoomState());
     this.roomCode = options?.roomCode;
     
-    console.log('Room created:', { roomCode: this.roomCode, roomId: this.roomId });
-    
     if (this.roomCode) {
       MyRoom.roomMap.set(this.roomCode, this.roomId);
     }
     
-    this.spawnInitialDucks();
     this.setupSimulation();
     this.setupMessageHandlers();
   }
 
   onJoin(client: Client, options?: any): void {
-    console.log('Player joined:', { roomCode: this.roomCode, clientId: client.sessionId });
-    
-    const player = new Player();
-    player.x = Math.floor(Math.random() * CONFIG.WORLD.WIDTH);
-    player.y = Math.floor(Math.random() * CONFIG.WORLD.HEIGHT);
-    
     const nickname = typeof options?.nickname === "string" ? options.nickname.trim() : "";
-    player.nickname = NICKNAME_REGEX.test(nickname) ? nickname : "";
+    const validNickname = NICKNAME_REGEX.test(nickname) ? nickname : "";
     
-    this.state.players.set(client.sessionId, player);
+    this.storeClientData(client.sessionId, validNickname);
+    
+    if (this.state.phase === RoomPhase.PLAYING) {
+      this.spawnPlayer(client.sessionId, validNickname);
+    } else {
+      const player = new Player();
+      player.nickname = validNickname;
+      player.x = 0;
+      player.y = 0;
+      this.state.players.set(client.sessionId, player);
+    }
   }
 
   onLeave(client: Client): void {
     this.state.players.delete(client.sessionId);
+    this.clientData.delete(client.sessionId);
   }
 
   onDispose(): void {
@@ -153,6 +160,14 @@ export class MyRoom extends Room<MyRoomState> {
       if (NICKNAME_REGEX.test(trimmed)) {
         player.nickname = trimmed;
       }
+    });
+
+    this.onMessage<string>(MESSAGE_TYPES.SET_PHASE, (client, phase) => {
+      this.handlePhaseChange(client, phase);
+    });
+
+    this.onMessage<any>(MESSAGE_TYPES.SET_GAME_OPTIONS, (client, options) => {
+      this.handleGameOptionsUpdate(client, options);
     });
   }
 
@@ -207,7 +222,149 @@ export class MyRoom extends Room<MyRoomState> {
     player.y = clamp(player.y, 0, HEIGHT);
   }
 
+  private handlePhaseChange(client: Client, phase: string): void {
+    if (!Object.values(RoomPhase).includes(phase as RoomPhase)) {
+      return;
+    }
+
+    const previousPhase = this.state.phase;
+    const newPhase = phase as RoomPhase;
+
+    this.state.phase = newPhase;
+
+    this.handleTimerStateChange(newPhase, previousPhase);
+    this.handleDuckLifecycle(newPhase, previousPhase);
+  }
+
+  private handleTimerStateChange(newPhase: RoomPhase, previousPhase: RoomPhase): void {
+    if (newPhase === RoomPhase.PLAYING && previousPhase !== RoomPhase.PLAYING) {
+      this.state.playingPhaseStartTime = Date.now();
+      this.state.finalGameTime = 0;
+    } else if (newPhase === RoomPhase.LOBBY && previousPhase === RoomPhase.PLAYING) {
+      this.state.playingPhaseStartTime = 0;
+      this.state.finalGameTime = 0;
+    } else if (newPhase === RoomPhase.ENDED && previousPhase === RoomPhase.PLAYING) {
+      const currentTime = Date.now();
+      const elapsedMs = currentTime - this.state.playingPhaseStartTime;
+      this.state.finalGameTime = elapsedMs / 1000;
+      this.state.playingPhaseStartTime = 0;
+    }
+  }
+
+  private handleDuckLifecycle(newPhase: RoomPhase, previousPhase: RoomPhase): void {
+    if (newPhase === RoomPhase.PLAYING && previousPhase !== RoomPhase.PLAYING) {
+      this.spawnInitialDucks();
+      this.spawnAllPlayers();
+    } else if (newPhase === RoomPhase.LOBBY && previousPhase !== RoomPhase.LOBBY) {
+      this.despawnAllDucks();
+      this.despawnAllPlayers();
+    }
+  }
+
+  private handleGameOptionsUpdate(client: Client, options: any): void {
+    if (!options || typeof options !== 'object') return;
+    
+    let hasChanges = false;
+    
+    if (options.colors && Array.isArray(options.colors)) {
+      const validColors = options.colors.filter((color: any) => 
+        typeof color === 'string' && /^#[0-9A-Fa-f]{6}$/.test(color)
+      );
+      
+      if (validColors.length >= 2 && validColors.length <= 8) {
+        this.state.gameOptions.colors.clear();
+        validColors.forEach(color => {
+          this.state.gameOptions.colors.push(color);
+        });
+        hasChanges = true;
+      }
+    }
+
+    if (typeof options.ducksCount === 'number') {
+      const ducksCount = Math.max(2, Math.min(20, Math.floor(options.ducksCount)));
+      this.state.gameOptions.ducksCount = ducksCount;
+      hasChanges = true;
+    }
+
+    if (hasChanges) {
+      this.broadcast(MESSAGE_TYPES.SET_GAME_OPTIONS, {
+        colors: Array.from(this.state.gameOptions.colors),
+        ducksCount: this.state.gameOptions.ducksCount
+      });
+    }
+  }
+
   // ====================== Duck Management ======================
+
+  private despawnAllDucks(): void {
+    // Clear all ducks from the state
+    this.state.ducks.clear();
+  }
+
+  // ====================== Player Management ======================
+
+  private storeClientData(sessionId: string, nickname: string): void {
+    this.clientData.set(sessionId, { nickname });
+  }
+
+  private setPlayerSpawnPosition(player: Player): void {
+    // Spawn player near boundary with constraints: 80-100px from edges
+    const { WIDTH, HEIGHT } = CONFIG.WORLD;
+    const minDistance = 80;
+    const maxDistance = 100;
+    
+    // Randomly choose which boundary to spawn near (top, right, bottom, left)
+    const boundary = Math.floor(Math.random() * 4);
+    
+    switch (boundary) {
+      case 0: // Top boundary
+        player.x = Math.floor(Math.random() * WIDTH);
+        player.y = Math.floor(Math.random() * (maxDistance - minDistance)) + minDistance;
+        break;
+      case 1: // Right boundary
+        player.x = Math.floor(Math.random() * (maxDistance - minDistance)) + (WIDTH - maxDistance);
+        player.y = Math.floor(Math.random() * HEIGHT);
+        break;
+      case 2: // Bottom boundary
+        player.x = Math.floor(Math.random() * WIDTH);
+        player.y = Math.floor(Math.random() * (maxDistance - minDistance)) + (HEIGHT - maxDistance);
+        break;
+      case 3: // Left boundary
+        player.x = Math.floor(Math.random() * (maxDistance - minDistance)) + minDistance;
+        player.y = Math.floor(Math.random() * HEIGHT);
+        break;
+    }
+  }
+
+  private spawnPlayer(sessionId: string, nickname: string): void {
+    const player = new Player();
+    player.nickname = nickname;
+    this.setPlayerSpawnPosition(player);
+    this.state.players.set(sessionId, player);
+  }
+
+  private spawnAllPlayers(): void {
+    // Spawn all connected clients that aren't already spawned
+    for (const [sessionId, data] of this.clientData) {
+      if (!this.state.players.has(sessionId)) {
+        this.spawnPlayer(sessionId, data.nickname);
+      } else {
+        // Player already exists in state (from lobby), just update their position
+        const player = this.state.players.get(sessionId);
+        if (player) {
+          this.setPlayerSpawnPosition(player);
+        }
+      }
+    }
+  }
+
+  private despawnAllPlayers(): void {
+    // Reset player positions but keep them in state for lobby display
+    for (const player of this.state.players.values()) {
+      player.x = 0;
+      player.y = 0;
+    }
+  }
 
   private spawnInitialDucks(): void {
     const { WIDTH, HEIGHT } = CONFIG.WORLD;
@@ -215,8 +372,12 @@ export class MyRoom extends Room<MyRoomState> {
     const centerY = HEIGHT / 2;
     const spread = CONFIG.DUCK.START_SPREAD;
 
-    for (const color of CONFIG.DUCK.COLORS) {
-      for (let i = 0; i < CONFIG.DUCK.START_PER_COLOR; i++) {
+    // Use game options for colors and count
+    const colors = this.state.gameOptions.colors;
+    const ducksPerColor = this.state.gameOptions.ducksCount;
+
+    for (const color of colors) {
+      for (let i = 0; i < ducksPerColor; i++) {
         const duck = new Duck();
         duck.color = color;
         duck.x = centerX + (Math.random() * 2 - 1) * spread;
@@ -479,33 +640,107 @@ export class MyRoom extends Room<MyRoomState> {
     }
   }
 
+  // ====================== Win Condition Check ======================
+
+  private changePhaseToEnded(): void {
+    const previousPhase = this.state.phase;
+    const newPhase = RoomPhase.ENDED;
+
+    this.state.phase = newPhase;
+
+    if (previousPhase === RoomPhase.PLAYING) {
+      const currentTime = Date.now();
+      const elapsedMs = currentTime - this.state.playingPhaseStartTime;
+      this.state.finalGameTime = elapsedMs / 1000;
+      this.state.playingPhaseStartTime = 0;
+    }
+  }
+
+  private checkWinCondition(groups: Group[]): boolean {
+    // Get all available colors from game options
+    const availableColors = Array.from(this.state.gameOptions.colors);
+    const ducksPerColor = this.state.gameOptions.ducksCount;
+    
+    // Count ducks by color in each group
+    const groupColorCounts = new Map<string, Map<string, number>>(); // groupId -> color -> count
+    
+    for (const group of groups) {
+      const colorCounts = new Map<string, number>();
+      
+      // Count ducks of each color in this group
+      for (const duckKey of group.members) {
+        const duck = this.state.ducks.get(duckKey);
+        if (duck) {
+          const currentCount = colorCounts.get(duck.color) || 0;
+          colorCounts.set(duck.color, currentCount + 1);
+        }
+      }
+      
+      groupColorCounts.set(group.id.toString(), colorCounts);
+    }
+    
+    // Check if we have exactly the right number of groups (one per color)
+    if (groups.length !== availableColors.length) {
+      return false;
+    }
+    
+    // Check if each group contains ducks of only one color and the correct count
+    for (const group of groups) {
+      const colorCounts = groupColorCounts.get(group.id.toString());
+      if (!colorCounts) continue;
+      
+      // Count how many different colors are in this group
+      const colorsInGroup = Array.from(colorCounts.keys());
+      if (colorsInGroup.length !== 1) {
+        return false; // Group has multiple colors
+      }
+      
+      // Check if this group has the correct number of ducks for its color
+      const color = colorsInGroup[0];
+      const countInGroup = colorCounts.get(color) || 0;
+      if (countInGroup !== ducksPerColor) {
+        return false; // Wrong number of ducks for this color
+      }
+    }
+    
+    // Check if all colors are represented
+    const representedColors = new Set<string>();
+    for (const group of groups) {
+      const colorCounts = groupColorCounts.get(group.id.toString());
+      if (colorCounts) {
+        const colorsInGroup = Array.from(colorCounts.keys());
+        if (colorsInGroup.length === 1) {
+          representedColors.add(colorsInGroup[0]);
+        }
+      }
+    }
+    
+    // All colors must be represented
+    return availableColors.every(color => representedColors.has(color));
+  }
+
   // ====================== Main Game Loop ======================
 
   private fixedTick(): void {
     const currentTime = Date.now();
 
-    // 1. Process player input and movement
+    if (this.state.players.size === 0) return;
+
     this.processPlayerMovement();
 
-    // 2. Apply duck flee behavior from players
-    this.applyFleeBehavior(currentTime);
+    if (this.state.ducks.size === 0) return;
 
-    // 3. Build duck groups (excluding panicking ducks)
+    this.applyFleeBehavior(currentTime);
     const groups = this.buildGroups(currentTime);
 
-    // 4. Set group movement targets and velocities
+    if (this.state.phase === RoomPhase.PLAYING && this.checkWinCondition(groups)) {
+      this.changePhaseToEnded();
+    }
+
     this.updateGroupBehavior(groups, currentTime);
-
-    // 5. Handle solo duck seeking behavior
     this.updateSoloDuckBehavior(groups, currentTime);
-
-    // 6. Apply group velocities to member ducks
     this.applyGroupVelocities(groups, currentTime);
-
-    // 7. Integrate duck positions
     this.integrateDuckPositions();
-
-    // 8. Resolve collisions and border constraints
     this.resolveCollisionsAndBorders();
   }
 

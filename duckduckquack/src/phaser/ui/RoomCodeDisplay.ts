@@ -32,7 +32,7 @@ export class RoomCodeDisplay {
     this.getIsLocked = getIsLocked;
 
     const textStyle: Phaser.Types.GameObjects.Text.TextStyle = {
-      fontFamily: "system-ui, Arial, sans-serif",
+      fontFamily: "Fredoka, sans-serif",
       fontSize: "16px",
       color: "#f0f0f0",
       stroke: "#000",

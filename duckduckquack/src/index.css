@@ -1,6 +1,6 @@
 /* Global styles and CSS variables */
 :root {
-  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
+  font-family: 'Fredoka', sans-serif;
   line-height: 1.5;
   font-weight: 400;
   color-scheme: light dark;
@@ -13,18 +13,26 @@
 }
 
 body {
-  margin: 0;
-  display: flex;
-  place-items: center;
-  min-width: 320px;
-  min-height: 100vh;
+  overflow-x: auto; /* Allow horizontal scrolling if needed */
+  overflow-y: auto; /* Allow vertical scrolling if needed */
 }
 
-/* Light theme support */
-@media (prefers-color-scheme: light) {
-  :root {
-    color: #213547;
-    background-color: #ffffff;
+/* Small screen optimizations */
+@media (max-width: 1024px) {
+  body {
+    place-items: flex-start; /* Align to top on small screens */
+    justify-content: flex-start; /* Align to left on small screens */
+  }
+  
+  #game-container {
+    margin: 0; /* Remove any margins on small screens */
+  }
+}
+
+/* Very small screens (mobile-like) */
+@media (max-width: 800px) {
+  body {
+    overflow-x: scroll; /* Force horizontal scroll on very small screens */
   }
 }
 
@@ -33,6 +41,9 @@ body {
   padding: 5px;
   transition: all 0.2s ease-in-out;
   position: relative;
+  /* Ensure game is always visible on small screens */
+  min-width: 800px;
+  min-height: 800px;
 }
 
 #game-container.is-unlocked {

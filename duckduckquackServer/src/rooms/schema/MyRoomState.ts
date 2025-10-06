@@ -1,4 +1,4 @@
-import { MapSchema, Schema, type } from "@colyseus/schema";
+import { ArraySchema, MapSchema, Schema, type } from "@colyseus/schema";
 
 /**
  * Player entity representing a connected client
@@ -27,9 +27,30 @@ export class Duck extends Schema {
 }
 
 /**
+ * Room phase states
+ */
+export enum RoomPhase {
+  LOBBY = "lobby",
+  PLAYING = "playing", 
+  ENDED = "ended"
+}
+
+/**
+ * Game options for duck spawning and colors
+ */
+export class GameOptions extends Schema {
+  @type([ "string" ]) colors = new ArraySchema<string>("#ff4d4f", "#52c41a", "#1677ff", "#ffff00");
+  @type("number") ducksCount: number = 4;
+}
+
+/**
  * Main game state containing all entities
  */
 export class MyRoomState extends Schema {
   @type({ map: Player }) players = new MapSchema<Player>();
   @type({ map: Duck }) ducks = new MapSchema<Duck>();
+  @type("string") phase: RoomPhase = RoomPhase.LOBBY;
+  @type("number") playingPhaseStartTime: number = 0;
+  @type("number") finalGameTime: number = 0; // Final time when game ended (in seconds)
+  @type(GameOptions) gameOptions = new GameOptions();
 }

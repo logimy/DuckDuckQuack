@@ -62,7 +62,7 @@ export function createNameLabel(
   text: string
 ) {
   const style: Phaser.Types.GameObjects.Text.TextStyle = {
-    fontFamily: "system-ui, Arial, sans-serif",
+    fontFamily: "Fredoka, sans-serif",
     fontSize: "14px",
     color: "#f0f0f0",
     stroke: "#000",

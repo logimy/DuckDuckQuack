@@ -175,9 +175,15 @@ export class DucksLayer {
 }
 
 /**
- * Converts color name to hex value
+ * Converts color (hex string or name) to hex value
  */
 function colorToHex(color: string): number {
+  // If it's already a hex color, convert it
+  if (color.startsWith('#')) {
+    return parseInt(color.slice(1), 16);
+  }
+  
+  // Fallback to color names for backward compatibility
   switch (color) {
     case "red":    return 0xff4d4f;
     case "green":  return 0x52c41a;

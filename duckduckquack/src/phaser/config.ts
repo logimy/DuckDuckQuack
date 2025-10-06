@@ -1,8 +1,13 @@
 import lmbUrl from "../../src/assets/LMB.png";
 
-/**
- * Game configuration constants
- */
+const getServerUrl = () => {
+  const serverHost = import.meta.env.VITE_SERVER_HOST || "localhost";
+  const serverPort = import.meta.env.VITE_SERVER_PORT || "2567";
+  const enableSSL = import.meta.env.VITE_ENABLE_SSL === "true";
+  const protocol = enableSSL ? "wss://" : "ws://";
+  return `${protocol}${serverHost}:${serverPort}`;
+};
+
 export const CONFIG = {
   world: { 
     width: 800, 
@@ -54,7 +59,7 @@ export const CONFIG = {
   },
   
   server: {
-    url: import.meta.env.VITE_SERVER_URL ?? "ws://localhost:2567",
+    url: getServerUrl(),
     roomName: "my_room",
   },
   
