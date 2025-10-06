@@ -43,9 +43,27 @@ export class GameScene extends Phaser.Scene {
   private isGameActive = false;
 
   preload() {
-    this.load.audio("quack01", quack01Url);
-    this.load.audio("quack02", quack02Url);
-    this.load.audio("quack03", quack03Url);
+    // Load audio with multiple format support for better browser compatibility
+    this.load.audio("quack01", [quack01Url]);
+    this.load.audio("quack02", [quack02Url]);
+    this.load.audio("quack03", [quack03Url]);
+    
+    // Add audio loading event handlers
+    this.load.on('filecomplete-audio-quack01', () => {
+      console.log('quack01 audio loaded successfully');
+    });
+    this.load.on('filecomplete-audio-quack02', () => {
+      console.log('quack02 audio loaded successfully');
+    });
+    this.load.on('filecomplete-audio-quack03', () => {
+      console.log('quack03 audio loaded successfully');
+    });
+    
+    this.load.on('loaderror', (file: any) => {
+      if (file.type === 'audio') {
+        console.error('Failed to load audio file:', file.key, file.url);
+      }
+    });
     
     this.helpOverlay = new HelpOverlay(this);
     this.helpOverlay.preload();
@@ -107,32 +125,78 @@ export class GameScene extends Phaser.Scene {
   }
 
   private initializeAudio() {
-    // Ensure audio context is ready
-    const webAudioManager = this.sound as any;
-    if (webAudioManager.context && webAudioManager.context.state === 'suspended') {
-      // Audio context is suspended, will be resumed on user interaction
-      webAudioManager.context.resume().catch(console.error);
-    }
+    // Don't try to access audio context immediately - wait for user interaction
+    // The audio context will be created and resumed when the user first interacts
+    console.log('Audio system initialized - waiting for user interaction');
+    
+    // Add a click-to-enable-audio message if needed
+    this.addClickToEnableAudioMessage();
+  }
+
+  private addClickToEnableAudioMessage() {
+    // Only show this message if audio is not muted
+    const isMuted = localStorage.getItem("ddq_sound_muted") === "1";
+    if (isMuted) return;
+    
+    const text = this.add.text(
+      CONFIG.world.width / 2,
+      CONFIG.world.height - 100,
+      "Click anywhere to enable audio",
+      {
+        fontFamily: "Fredoka, sans-serif",
+        fontSize: "16px",
+        color: "#ffffff",
+        stroke: "#000000",
+        strokeThickness: 2,
+        shadow: { offsetX: 0, offsetY: 2, blur: 0, color: "#000", fill: true },
+      }
+    ).setOrigin(0.5).setDepth(1000);
+    
+    // Remove the message after 3 seconds or when user interacts
+    this.time.delayedCall(3000, () => {
+      if (text && text.active) {
+        text.destroy();
+      }
+    });
+    
+    // Also remove on first user interaction
+    this.input.once("pointerdown", () => {
+      if (text && text.active) {
+        text.destroy();
+      }
+    });
   }
 
   private resumeAudioContext() {
     const webAudioManager = this.sound as any;
+    
+    // Check if sound manager is locked (Phaser's built-in check)
+    if (this.sound.locked) {
+      console.log('Sound manager is locked - attempting to unlock');
+      this.sound.unlock();
+    }
+    
+    // If Phaser's audio context exists, resume it
     if (webAudioManager.context) {
       if (webAudioManager.context.state === 'suspended') {
         webAudioManager.context.resume().then(() => {
-          console.log('Audio context resumed');
+          console.log('Phaser audio context resumed');
         }).catch(console.error);
+      } else {
+        console.log('Phaser audio context already running');
       }
     } else {
-      // If context doesn't exist yet, try to create it
+      // If no context exists yet, try to create one
       try {
         const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
         if (AudioContextClass) {
           const audioContext = new AudioContextClass();
           if (audioContext.state === 'suspended') {
             audioContext.resume().then(() => {
-              console.log('Audio context created and resumed');
+              console.log('New audio context created and resumed');
             }).catch(console.error);
+          } else {
+            console.log('New audio context created and running');
           }
         }
       } catch (error) {

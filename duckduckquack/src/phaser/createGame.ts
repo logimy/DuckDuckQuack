@@ -18,6 +18,7 @@ export function createPhaserGame(parent: HTMLElement, roomCode: string): Phaser.
     audio: {
       disableWebAudio: false,
       context: undefined, // Let Phaser create its own audio context
+      noAudio: false,
     },
   };
 

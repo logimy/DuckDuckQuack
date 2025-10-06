@@ -148,6 +148,12 @@ export class DucksLayer {
   private playQuackFor(view: DuckView) {
     const key = this.quackKeys[(Math.random() * this.quackKeys.length) | 0];
   
+    // Check if sound manager is locked
+    if (this.scene.sound.locked) {
+      console.log('Sound manager is locked - cannot play audio');
+      return;
+    }
+  
     // Randomize audio parameters for natural variation
     const volume = 0.08 + Math.random() * 0.07;  // 0.08-0.15
     const rate = 0.9 + Math.random() * 0.25;     // 0.9-1.15 (speed + pitch)
@@ -159,11 +165,20 @@ export class DucksLayer {
       -1, 1
     ) * 0.6;
   
-    const sound = this.scene.sound.add(key, { volume, rate, detune });
-    (sound as any).setPan?.(pan);
-  
-    sound.once("complete", () => sound.destroy());
-    sound.play();
+    try {
+      const sound = this.scene.sound.add(key, { volume, rate, detune });
+      (sound as any).setPan?.(pan);
+      
+      sound.once("complete", () => sound.destroy());
+      sound.once("error", (error: any) => {
+        console.error('Audio playback error:', error);
+        sound.destroy();
+      });
+      
+      sound.play();
+    } catch (error) {
+      console.error('Failed to create or play sound:', error);
+    }
   }
 
   /**
