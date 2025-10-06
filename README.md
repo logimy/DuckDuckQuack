@@ -1,20 +1,17 @@
 # DuckDuckQuack 🦆
 
-A real-time multiplayer duck hunting game built with React, TypeScript, Phaser.js, and Colyseus.
+A real-time multiplayer duck game built with React, TypeScript, Phaser.js, and Colyseus.
 
 ## 🎮 About
 
-DuckDuckQuack is a fun multiplayer game where players hunt ducks in a shared game world. Players can create or join rooms using room codes, customize game settings, and compete in real-time duck hunting sessions.
+DuckDuckQuack is a multiplayer game where players sorts ducks by colors in a shared game world. Players can create or join rooms using room codes, customize game settings, and compete in real-time duck sorting sessions.
 
 ## ✨ Features
 
 - **Real-time Multiplayer**: Join rooms with friends using room codes
-- **Duck Hunting Gameplay**: Hunt ducks in a shared game world
-- **Cross-Platform**: Works on desktop and mobile browsers
 - **Room-based Gaming**: Create or join rooms with unique codes
 - **Game Customization**: Customize duck colors and count
 - **SSL/TLS Support**: Secure connections for production deployments
-- **Environment Configuration**: Flexible setup for development and production
 
 ## 🚀 Quick Start
 
@@ -97,8 +94,8 @@ DuckDuckQuack/
 
 ## 🎯 Game Controls
 
-- **Mouse/Touch**: Move your duck hunter
-- **Click/Tap**: Interact with game elements
+- **Mouse**: Move your duck hunter
+- **Click**: Interact with game elements
 - **Room Code**: Share the room code with friends to play together
 
 ## 🌐 Multiplayer Setup
@@ -162,4 +159,4 @@ MIT License - see LICENSE file for details
 
 ---
 
-**Happy Duck Hunting!** 🦆🎯
+**Happy Duck Sorting!** 🦆🎯
