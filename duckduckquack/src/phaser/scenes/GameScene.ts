@@ -117,10 +117,27 @@ export class GameScene extends Phaser.Scene {
 
   private resumeAudioContext() {
     const webAudioManager = this.sound as any;
-    if (webAudioManager.context && webAudioManager.context.state === 'suspended') {
-      webAudioManager.context.resume().then(() => {
-        console.log('Audio context resumed');
-      }).catch(console.error);
+    if (webAudioManager.context) {
+      if (webAudioManager.context.state === 'suspended') {
+        webAudioManager.context.resume().then(() => {
+          console.log('Audio context resumed');
+        }).catch(console.error);
+      }
+    } else {
+      // If context doesn't exist yet, try to create it
+      try {
+        const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+        if (AudioContextClass) {
+          const audioContext = new AudioContextClass();
+          if (audioContext.state === 'suspended') {
+            audioContext.resume().then(() => {
+              console.log('Audio context created and resumed');
+            }).catch(console.error);
+          }
+        }
+      } catch (error) {
+        console.error('Failed to create audio context:', error);
+      }
     }
   }
 
@@ -302,6 +319,9 @@ export class GameScene extends Phaser.Scene {
 
   private wirePointerMove() {
     this.input.on("pointermove", (pointer: Phaser.Input.Pointer) => {
+      // Resume audio context on any user interaction
+      this.resumeAudioContext();
+      
       const camera = this.cameras.main;
       
       if (this.isPointerLocked) {
