@@ -12,7 +12,6 @@ import { ReconcileSystem } from "../systems/ReconcileSystem";
 import { interpolateRemotes } from "../systems/RemoteInterpolationSystem";
 import { ColyseusBridge } from "../net/ColyseusBridge";
 import { DucksLayer } from "../entities/ducks";
-import { NicknameOverlay } from "../ui/NicknameOverlay";
 import quack01Url from "../../assets/sfx/quack01.ogg?url";
 import quack02Url from "../../assets/sfx/quack02.ogg?url";
 import quack03Url from "../../assets/sfx/quack03.ogg?url";
@@ -27,7 +26,6 @@ export class GameScene extends Phaser.Scene {
   private tetherSystem!: TetherSystem;
   private movementSystem!: MovementSystem;
   private reconcileSystem!: ReconcileSystem;
-  private nicknameOverlay!: NicknameOverlay;
 
   private ducksLayer!: DucksLayer;
 
@@ -116,11 +114,9 @@ export class GameScene extends Phaser.Scene {
   }
 
   private initializeNicknameGate() {
-    this.nicknameOverlay = new NicknameOverlay(this);
-    const savedNickname = localStorage.getItem("ddq_nick");
-    this.nicknameOverlay.create(savedNickname, async (finalNickname) => {
-      localStorage.setItem("ddq_nick", finalNickname);
-      await this.connectToNetwork(finalNickname);
+    // Listen for nickname from React component
+    this.game.events.on('nicknameEntered', async (nickname: string) => {
+      await this.connectToNetwork(nickname);
     });
   }
 
@@ -252,7 +248,7 @@ export class GameScene extends Phaser.Scene {
     });
 
     this.events.on('roomConnected', () => {
-      this.nicknameOverlay?.hideSpawnButton();
+      // Room connected - no longer need nickname overlay
     });
 
     this.game.events.on('updateGameOptions', (options: any) => {
@@ -312,7 +308,6 @@ export class GameScene extends Phaser.Scene {
       this.reconcileSystem.setPlayer(sprite);
 
       this.helpOverlay.setVisible(!this.isPointerLocked);
-      this.nicknameOverlay?.hideSpawnButton();
       this.roomCodeDisplay.setVisible(!this.isPointerLocked, true);
 
       if (this.isPointerLocked) {
@@ -321,7 +316,6 @@ export class GameScene extends Phaser.Scene {
         this.hideCursorAndTether();
       }
     } else {
-      this.nicknameOverlay?.hideSpawnButton();
       this.roomCodeDisplay.setVisible(!this.isPointerLocked, true);
     }
 
@@ -349,7 +343,6 @@ export class GameScene extends Phaser.Scene {
     
     if (playerId === this.net.sessionId) {
       this.localPlayer = undefined;
-      this.nicknameOverlay?.hideSpawnButton();
     }
 
     this.emitPlayersUpdate();
@@ -503,7 +496,6 @@ export class GameScene extends Phaser.Scene {
     this.helpOverlay?.destroy();
     this.soundToggle?.destroy();
     this.roomCodeDisplay?.destroy();
-    this.nicknameOverlay?.destroy();
     this.timerUI?.destroy();
 
     this.ducksLayer?.clear();

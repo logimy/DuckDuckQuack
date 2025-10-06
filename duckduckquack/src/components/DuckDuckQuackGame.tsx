@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { createPhaserGame } from "../phaser/createGame";
 import { LobbyScreen } from "./LobbyScreen";
 import { WinScreen } from "./WinScreen";
+import { NicknameOverlay } from "./NicknameOverlay";
 import type { PhaserGame } from "../phaser/types";
 
 interface DuckDuckQuackGameProps {
@@ -28,6 +29,7 @@ export default function DuckDuckQuackGame({ roomCode }: DuckDuckQuackGameProps) 
   
   const [isLobbyVisible, setIsLobbyVisible] = useState(false);
   const [isWinScreenVisible, setIsWinScreenVisible] = useState(false);
+  const [isNicknameOverlayVisible, setIsNicknameOverlayVisible] = useState(true);
   const [players, setPlayers] = useState<Player[]>([]);
   const [matchTime, setMatchTime] = useState(0);
   const [gameOptions, setGameOptions] = useState<GameOptions>(DEFAULT_GAME_OPTIONS);
@@ -86,6 +88,12 @@ export default function DuckDuckQuackGame({ roomCode }: DuckDuckQuackGameProps) 
     gameRef.current?.events.emit('startGame');
   }, []);
 
+  const handleNicknameJoin = useCallback((nickname: string) => {
+    setIsNicknameOverlayVisible(false);
+    // Send the nickname to the Phaser game
+    gameRef.current?.events.emit('nicknameEntered', nickname);
+  }, []);
+
   return (
     <div style={{ position: 'relative', height: 800 }}>
       <div
@@ -118,6 +126,12 @@ export default function DuckDuckQuackGame({ roomCode }: DuckDuckQuackGameProps) 
         players={players}
         matchTime={matchTime}
         onPlayAgain={handlePlayAgain}
+      />
+      
+      <NicknameOverlay
+        isVisible={isNicknameOverlayVisible}
+        initialNickname={localStorage.getItem('ddq_nick')}
+        onJoin={handleNicknameJoin}
       />
     </div>
   );
